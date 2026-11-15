@@ -1,0 +1,242 @@
+package com.example.data.agent
+
+import com.example.data.network.ProviderRegistry
+import com.example.data.preferences.SettingsDataStore
+import com.example.data.repository.ChatRepository
+import com.example.data.workspace.WorkspaceManager
+import com.example.domain.model.ChatCompletionRequest
+import com.example.domain.model.ChatMessageDto
+import com.example.domain.model.ChatMessageUi
+import com.example.domain.model.ChatRole
+import com.example.domain.model.PendingDeletionConfirmation
+import com.example.domain.model.StreamEvent
+import com.example.domain.model.ToolCallDto
+import com.example.domain.model.ToolCallRecord
+import com.example.domain.model.ToolExecutionStatus
+import com.example.domain.model.ToolSupportStatus
+import kotlinx.coroutines.CancellationException
+import java.util.UUID
+
+class CodingAgentOrchestrator(
+    private val providerRegistry: ProviderRegistry,
+    private val settingsDataStore: SettingsDataStore,
+    private val chatRepository: ChatRepository,
+    private val toolExecutor: AgentToolExecutor,
+    private val workspaceManager: WorkspaceManager
+) {
+    suspend fun runAgentTurn(
+        sessionId: String,
+        projectId: String?,
+        providerId: String,
+        modelId: String,
+        userText: String,
+        onStreamingMessageUpdated: (ChatMessageUi?) -> Unit,
+        confirmDeletion: suspend (PendingDeletionConfirmation) -> Boolean
+    ) {
+        val adapter = providerRegistry.getAdapter(providerId)
+            ?: throw IllegalStateException("Unknown provider: $providerId")
+
+        val config = settingsDataStore.getProviderConfig(providerId) ?: adapter.defaultConfig()
+        val apiKey = settingsDataStore.getApiKey(providerId)
+        val settings = settingsDataStore.getSettings()
+
+        // Auto-title new session from the first user prompt
+        val existingMessages = chatRepository.getMessages(sessionId)
+        if (existingMessages.isEmpty()) {
+            val autoTitle = userText.trim().lineSequence().firstOrNull()
+                ?.take(48)?.ifBlank { "New Chat" } ?: "New Chat"
+            chatRepository.updateSessionTitle(sessionId, autoTitle)
+        }
+        chatRepository.updateSessionProviderAndModel(sessionId, providerId, modelId)
+
+        val userMessage = ChatMessageUi(
+            id = UUID.randomUUID().toString(),
+            sessionId = sessionId,
+            role = ChatRole.USER,
+            content = userText,
+            providerId = providerId,
+            modelId = modelId
+        )
+        chatRepository.saveMessage(userMessage)
+
+        val projectSummary = buildWorkspaceSummary(projectId)
+        val fullSystemPrompt = buildString {
+            append(settings.systemPrompt)
+            append("\n\n")
+            append(projectSummary)
+        }
+
+        val toolSupport = adapter.modelToolSupport(modelId)
+        val toolsToSend = if (toolSupport == ToolSupportStatus.UNSUPPORTED) {
+            emptyList()
+        } else {
+            toolExecutor.toolDefinitions
+        }
+
+        val maxLoops = 24
+        for (step in 0 until maxLoops) {
+            val history = chatRepository.getMessages(sessionId)
+            val dtoMessages = buildList {
+                add(ChatMessageDto(role = ChatRole.SYSTEM, content = fullSystemPrompt))
+                for (msg in history) {
+                    if (msg.role == ChatRole.USER) {
+                        add(ChatMessageDto(role = ChatRole.USER, content = msg.content))
+                    } else if (msg.role == ChatRole.ASSISTANT) {
+                        if (msg.errorMessage != null && msg.content.isBlank() && msg.toolCalls.isEmpty()) {
+                            continue
+                        }
+                        add(
+                            ChatMessageDto(
+                                role = ChatRole.ASSISTANT,
+                                content = msg.content,
+                                toolCalls = msg.toolCalls.map {
+                                    ToolCallDto(it.id, it.name, it.argumentsJson)
+                                }
+                            )
+                        )
+                        for (tc in msg.toolCalls) {
+                            add(
+                                ChatMessageDto(
+                                    role = ChatRole.TOOL,
+                                    content = tc.resultText.ifBlank { "No output" },
+                                    toolCallId = tc.id,
+                                    toolName = tc.name
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            val assistantMsgId = UUID.randomUUID().toString()
+            val textBuilder = StringBuilder()
+            val reasoningBuilder = StringBuilder()
+            val toolRecords = mutableListOf<ToolCallRecord>()
+            var streamError: String? = null
+
+            fun currentUiMessage(streaming: Boolean): ChatMessageUi = ChatMessageUi(
+                id = assistantMsgId,
+                sessionId = sessionId,
+                role = ChatRole.ASSISTANT,
+                content = textBuilder.toString(),
+                reasoning = reasoningBuilder.toString(),
+                toolCalls = toolRecords.toList(),
+                providerId = providerId,
+                modelId = modelId,
+                errorMessage = streamError,
+                isStreaming = streaming
+            )
+
+            onStreamingMessageUpdated(currentUiMessage(streaming = true))
+
+            try {
+                val request = ChatCompletionRequest(
+                    model = modelId,
+                    messages = dtoMessages,
+                    tools = toolsToSend
+                )
+                adapter.streamChat(request, config, apiKey).collect { event ->
+                    when (event) {
+                        is StreamEvent.TextDelta -> {
+                            textBuilder.append(event.text)
+                            onStreamingMessageUpdated(currentUiMessage(streaming = true))
+                        }
+                        is StreamEvent.ReasoningDelta -> {
+                            reasoningBuilder.append(event.text)
+                            onStreamingMessageUpdated(currentUiMessage(streaming = true))
+                        }
+                        is StreamEvent.ToolCallCompleted -> {
+                            toolRecords += ToolCallRecord(
+                                id = event.toolCall.id,
+                                name = event.toolCall.name,
+                                argumentsJson = event.toolCall.argumentsJson,
+                                status = ToolExecutionStatus.RUNNING
+                            )
+                            onStreamingMessageUpdated(currentUiMessage(streaming = true))
+                        }
+                        is StreamEvent.UsageReported -> {
+                            chatRepository.addTokenUsage(
+                                sessionId = sessionId,
+                                prompt = event.usage.promptTokens,
+                                completion = event.usage.completionTokens,
+                                total = event.usage.totalTokens
+                            )
+                        }
+                        is StreamEvent.Error -> {
+                            streamError = event.message
+                            onStreamingMessageUpdated(currentUiMessage(streaming = false))
+                        }
+                        StreamEvent.Done -> Unit
+                    }
+                }
+            } catch (ce: CancellationException) {
+                if (textBuilder.isNotEmpty() || reasoningBuilder.isNotEmpty() || toolRecords.isNotEmpty()) {
+                    val stoppedMsg = currentUiMessage(streaming = false).copy(
+                        errorMessage = "Generation stopped by user."
+                    )
+                    chatRepository.saveMessage(stoppedMsg)
+                }
+                onStreamingMessageUpdated(null)
+                throw ce
+            }
+
+            if (streamError != null) {
+                chatRepository.saveMessage(currentUiMessage(streaming = false))
+                onStreamingMessageUpdated(null)
+                return
+            }
+
+            if (toolRecords.isEmpty()) {
+                chatRepository.saveMessage(currentUiMessage(streaming = false))
+                onStreamingMessageUpdated(null)
+                return
+            }
+
+            // Execute each requested tool inline
+            for (idx in toolRecords.indices) {
+                val tc = toolRecords[idx]
+                if (tc.name == "delete_file") {
+                    toolRecords[idx] = tc.copy(status = ToolExecutionStatus.AWAITING_CONFIRMATION)
+                    onStreamingMessageUpdated(currentUiMessage(streaming = true))
+                }
+                val outcome = toolExecutor.execute(
+                    projectId = projectId,
+                    toolCallId = tc.id,
+                    toolName = tc.name,
+                    argumentsJson = tc.argumentsJson,
+                    confirmDeletion = confirmDeletion
+                )
+                val finalStatus = when {
+                    outcome.wasCancelled -> ToolExecutionStatus.CANCELLED
+                    outcome.success -> ToolExecutionStatus.SUCCESS
+                    else -> ToolExecutionStatus.ERROR
+                }
+                toolRecords[idx] = tc.copy(
+                    status = finalStatus,
+                    resultText = outcome.output
+                )
+                onStreamingMessageUpdated(currentUiMessage(streaming = true))
+            }
+
+            chatRepository.saveMessage(currentUiMessage(streaming = false))
+            onStreamingMessageUpdated(null)
+        }
+    }
+
+    private suspend fun buildWorkspaceSummary(projectId: String?): String {
+        if (projectId.isNullOrBlank()) {
+            return "Active Workspace: None selected. If the user wants to read/write project files, ask them to create or select a project in the Workspace tab."
+        }
+        val project = workspaceManager.getProject(projectId)
+            ?: return "Active Workspace: None selected."
+        val nodes = workspaceManager.buildFileTree(projectId)
+        val preview = if (nodes.isEmpty()) {
+            "(empty workspace)"
+        } else {
+            nodes.take(60).joinToString("\n") { node ->
+                if (node.isDirectory) "  [DIR] ${node.relativePath}/" else "  ${node.relativePath}"
+            } + if (nodes.size > 60) "\n  ... (${nodes.size - 60} more items)" else ""
+        }
+        return "Active Workspace: '${project.name}'\nWorkspace Files:\n$preview"
+    }
+}
