@@ -65,6 +65,16 @@ jobs:
           fi
           chmod +x gradlew
 
+      - name: Ensure debug.keystore exists
+        run: |
+          if [ ! -f debug.keystore ]; then
+            if [ -f debug.keystore.base64 ]; then
+              tr -d '\n\r ' < debug.keystore.base64 | base64 --decode > debug.keystore
+            else
+              keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            fi
+          fi
+
       - name: Decode upload keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
