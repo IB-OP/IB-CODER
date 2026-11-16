@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.AppContainer
+import com.example.data.network.GitHubPushClient
 import com.example.data.network.ProviderRegistry
 import com.example.data.preferences.SettingsDataStore
 import com.example.domain.model.AppSettings
@@ -20,15 +21,26 @@ data class SettingsUiState(
     val settings: AppSettings = AppSettings(),
     val providers: List<ProviderMetadata> = emptyList(),
     val providerConfigs: Map<String, ProviderConfig> = emptyMap(),
+    val mcpEnabledCount: Int = 0,
+    val mcpToolCount: Int = 0,
+    val gitHubToken: String = "",
+    val gitHubDefaultOwner: String = "",
+    val gitHubStatusMessage: String? = null,
+    val gitHubVerifying: Boolean = false,
     val savedBanner: String? = null
 )
 
 class SettingsViewModel(
     private val settingsDataStore: SettingsDataStore,
-    private val providerRegistry: ProviderRegistry
+    private val providerRegistry: ProviderRegistry,
+    private val gitHubPushClient: GitHubPushClient
 ) : ViewModel() {
 
     private val savedBanner = MutableStateFlow<String?>(null)
+    private val gitHubTokenState = MutableStateFlow("")
+    private val gitHubStatusState = MutableStateFlow<String?>(null)
+    private val gitHubVerifyingState = MutableStateFlow(false)
+
     private val _uiState = MutableStateFlow(
         SettingsUiState(providers = providerRegistry.adapters.map { it.metadata })
     )
@@ -36,16 +48,49 @@ class SettingsViewModel(
 
     init {
         viewModelScope.launch {
-            combine(
+            settingsDataStore.hasGitHubTokenFlow.collect {
+                gitHubTokenState.value = settingsDataStore.getGitHubToken()
+            }
+        }
+
+        viewModelScope.launch {
+            val baseFlow = combine(
                 settingsDataStore.settingsFlow,
                 settingsDataStore.providerConfigsFlow,
+                settingsDataStore.mcpServersFlow,
                 savedBanner
-            ) { settings, configs, banner ->
-                SettingsUiState(
+            ) { settings, configs, mcpServers, banner ->
+                val enabledServers = mcpServers.filter { it.enabled }
+                BaseBundle(
                     settings = settings,
+                    configs = configs,
+                    mcpEnabledCount = enabledServers.size,
+                    mcpToolCount = enabledServers.sumOf { it.discoveredTools.size },
+                    banner = banner
+                )
+            }
+
+            val gitHubFlow = combine(
+                gitHubTokenState,
+                settingsDataStore.githubDefaultOwnerFlow,
+                gitHubStatusState,
+                gitHubVerifyingState
+            ) { token, owner, status, verifying ->
+                GitHubBundle(token, owner, status, verifying)
+            }
+
+            combine(baseFlow, gitHubFlow) { b, gh ->
+                SettingsUiState(
+                    settings = b.settings,
                     providers = providerRegistry.adapters.map { it.metadata },
-                    providerConfigs = configs,
-                    savedBanner = banner
+                    providerConfigs = b.configs,
+                    mcpEnabledCount = b.mcpEnabledCount,
+                    mcpToolCount = b.mcpToolCount,
+                    gitHubToken = gh.token,
+                    gitHubDefaultOwner = gh.owner,
+                    gitHubStatusMessage = gh.status,
+                    gitHubVerifying = gh.verifying,
+                    savedBanner = b.banner
                 )
             }.collect { state ->
                 _uiState.value = state
@@ -63,6 +108,34 @@ class SettingsViewModel(
         viewModelScope.launch {
             settingsDataStore.setDefaultProviderAndModel(providerId, modelId.trim())
             savedBanner.value = "Default provider updated."
+        }
+    }
+
+    fun saveGitHubConfig(token: String, defaultOwner: String, verify: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.saveGitHubToken(token)
+            settingsDataStore.saveGitHubDefaultOwner(defaultOwner)
+            gitHubTokenState.value = token.trim()
+
+            if (!verify || token.isBlank()) {
+                gitHubStatusState.value = if (token.isBlank()) "GitHub token cleared." else "GitHub settings saved."
+                return@launch
+            }
+
+            gitHubVerifyingState.value = true
+            gitHubStatusState.value = null
+            gitHubPushClient.verifyToken(token).fold(
+                onSuccess = { profile ->
+                    if (defaultOwner.isBlank()) {
+                        settingsDataStore.saveGitHubDefaultOwner(profile.login)
+                    }
+                    gitHubStatusState.value = "Connected as @${profile.login}."
+                },
+                onFailure = { err ->
+                    gitHubStatusState.value = "Error: ${err.message ?: "Token check failed."}"
+                }
+            )
+            gitHubVerifyingState.value = false
         }
     }
 
@@ -84,12 +157,28 @@ class SettingsViewModel(
         savedBanner.value = null
     }
 
+    private data class BaseBundle(
+        val settings: AppSettings,
+        val configs: Map<String, ProviderConfig>,
+        val mcpEnabledCount: Int,
+        val mcpToolCount: Int,
+        val banner: String?
+    )
+
+    private data class GitHubBundle(
+        val token: String,
+        val owner: String,
+        val status: String?,
+        val verifying: Boolean
+    )
+
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return SettingsViewModel(
                 settingsDataStore = container.settingsDataStore,
-                providerRegistry = container.providerRegistry
+                providerRegistry = container.providerRegistry,
+                gitHubPushClient = container.gitHubPushClient
             ) as T
         }
     }

@@ -2,6 +2,7 @@ package com.example.ui.screens.chat
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -29,9 +30,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddComment
+import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -39,6 +42,7 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.HourglassTop
+import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tune
@@ -75,17 +79,23 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.R
 import com.example.domain.model.ChatMessageUi
 import com.example.domain.model.ChatRole
+import com.example.domain.model.GitHubSyncStatus
 import com.example.domain.model.ToolCallRecord
 import com.example.domain.model.ToolExecutionStatus
 import com.example.domain.model.ToolSupportStatus
 import com.example.ui.components.MarkdownMessageContent
+import com.example.ui.theme.BrandWordmarkStyle
 import com.example.ui.theme.JetBrainsMonoFamily
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,7 +103,9 @@ import com.example.ui.theme.JetBrainsMonoFamily
 fun ChatScreen(
     viewModel: ChatViewModel,
     onOpenProviders: () -> Unit,
-    onOpenWorkspace: () -> Unit
+    onOpenWorkspace: () -> Unit,
+    onOpenMcpServers: () -> Unit,
+    onOpenGitHub: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var promptText by rememberSaveable { mutableStateOf("") }
@@ -117,31 +129,44 @@ fun ChatScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(
-                            text = state.currentSession?.title ?: "AI Coder",
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Image(
+                            painter = painterResource(R.drawable.ib_coder_logo),
+                            contentDescription = "IB CODER logo",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
                         )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                        Column {
                             Text(
-                                text = "${state.selectedProviderId} / ${state.selectedModelId.ifBlank { "no model" }}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
+                                text = state.currentSession?.title ?: "IB CODER",
+                                style = if (state.currentSession == null) BrandWordmarkStyle else MaterialTheme.typography.titleMedium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            state.currentSession?.let { s ->
-                                if (s.totalTokens > 0) {
-                                    Text(
-                                        text = "• ${s.totalTokens} tok",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "${state.selectedProviderId} / ${state.selectedModelId.ifBlank { "no model" }}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                state.currentSession?.let { s ->
+                                    if (s.totalTokens > 0) {
+                                        Text(
+                                            text = "• ${s.totalTokens} tok",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -260,6 +285,102 @@ fun ChatScreen(
                         label = { Text("Providers & Keys") },
                         modifier = Modifier.testTag("chat_providers_chip")
                     )
+
+                    AssistChip(
+                        onClick = onOpenMcpServers,
+                        label = {
+                            Text(
+                                if (state.mcpToolCount > 0) "MCP (${state.mcpToolCount})"
+                                else if (state.mcpEnabledServerCount > 0) "MCP (${state.mcpEnabledServerCount})"
+                                else "MCP"
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Rounded.Hub,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        modifier = Modifier.testTag("chat_mcp_chip")
+                    )
+
+                    if (state.activeGitHubConfig != null) {
+                        val syncLabel = when (val s = state.activeSyncStatus) {
+                            is GitHubSyncStatus.Syncing -> "Syncing..."
+                            is GitHubSyncStatus.Synced -> "Synced ${s.commitSha.take(7)}"
+                            is GitHubSyncStatus.Error -> "Sync Error"
+                            GitHubSyncStatus.Idle -> if (state.activeGitHubConfig!!.autoSyncEnabled) "Auto-Sync On" else "GitHub Sync"
+                        }
+                        AssistChip(
+                            onClick = onOpenGitHub,
+                            label = { Text(syncLabel) },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Rounded.CloudSync,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            },
+                            modifier = Modifier.testTag("chat_github_sync_chip")
+                        )
+                    }
+                }
+
+                // Failed Workflow Alert Banner with 1-tap AI Auto-Fix
+                state.pendingWorkflowAlert?.let { alert ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.ErrorOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Actions Failure: ${alert.summary}",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                Text(
+                                    text = "${alert.owner}/${alert.repo} (${alert.branch})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                            Button(
+                                onClick = viewModel::fixPendingWorkflowAlert,
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                modifier = Modifier.testTag("chat_fix_workflow_ai_button")
+                            ) {
+                                Icon(Icons.Rounded.AutoFixHigh, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Fix with AI")
+                            }
+                            IconButton(
+                                onClick = viewModel::dismissWorkflowAlert,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Close,
+                                    contentDescription = "Dismiss workflow alert",
+                                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
                 }
 
                 // Tool calling unsupported warning banner
@@ -555,23 +676,21 @@ private fun EmptyChatState(
         verticalArrangement = Arrangement.Center
     ) {
         Surface(
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier.size(64.dp)
+            shape = RoundedCornerShape(22.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            modifier = Modifier.size(84.dp)
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.Rounded.SmartToy,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(34.dp)
-                )
-            }
+            Image(
+                painter = painterResource(R.drawable.ib_coder_logo),
+                contentDescription = "IB CODER emblem",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
         }
         Spacer(Modifier.height(16.dp))
         Text(
-            text = "On-Device AI Coding Agent",
-            style = MaterialTheme.typography.headlineSmall
+            text = "IB CODER",
+            style = MaterialTheme.typography.displaySmall
         )
         Spacer(Modifier.height(6.dp))
         Text(

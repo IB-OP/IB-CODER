@@ -16,3 +16,9 @@ data object SettingsRoute
 
 @Serializable
 data object ProvidersRoute
+
+@Serializable
+data object McpServersRoute
+
+@Serializable
+data object GitHubRoute

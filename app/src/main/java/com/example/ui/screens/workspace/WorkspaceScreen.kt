@@ -28,8 +28,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.NoteAdd
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Archive
+import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
@@ -37,7 +39,6 @@ import androidx.compose.material.icons.rounded.DriveFileRenameOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOpen
-import androidx.compose.material.icons.rounded.NoteAdd
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.SmartToy
@@ -74,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.model.FileNode
+import com.example.domain.model.GitHubSyncStatus
 import com.example.ui.components.SyntaxHighlighter
 import com.example.ui.theme.JetBrainsMonoFamily
 
@@ -92,6 +94,7 @@ fun WorkspaceScreen(
     var showDeleteProject by remember { mutableStateOf(false) }
     var showNewFileDialog by remember { mutableStateOf(false) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
+    var showGitHubPushDialog by remember { mutableStateOf(false) }
     var pendingDeleteNode by remember { mutableStateOf<FileNode?>(null) }
 
     val importZipLauncher = rememberLauncherForActivityResult(
@@ -177,6 +180,15 @@ fun WorkspaceScreen(
                         Icon(Icons.Rounded.Unarchive, contentDescription = "Import zip project")
                     }
                     if (state.activeProject != null) {
+                        IconButton(
+                            onClick = {
+                                viewModel.resetGitHubDialogFeedback()
+                                showGitHubPushDialog = true
+                            },
+                            modifier = Modifier.testTag("workspace_github_push_icon_button")
+                        ) {
+                            Icon(Icons.Rounded.CloudUpload, contentDescription = "Push project to GitHub")
+                        }
                         IconButton(
                             onClick = {
                                 val safeName = (state.activeProject?.name ?: "project")
@@ -302,7 +314,7 @@ fun WorkspaceScreen(
                         onClick = { showNewFileDialog = true },
                         modifier = Modifier.testTag("workspace_new_file_button")
                     ) {
-                        Icon(Icons.Rounded.NoteAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.AutoMirrored.Rounded.NoteAdd, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("New File")
                     }
@@ -321,6 +333,40 @@ fun WorkspaceScreen(
                         Icon(Icons.Rounded.SmartToy, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Ask Agent")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.resetGitHubDialogFeedback()
+                            showGitHubPushDialog = true
+                        },
+                        modifier = Modifier.testTag("workspace_push_github_button")
+                    ) {
+                        Icon(Icons.Rounded.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (state.activeProjectGitHubConfig?.repo?.isNotBlank() == true) "GitHub"
+                            else "Push to GitHub"
+                        )
+                    }
+                    if (state.activeProjectGitHubConfig?.repo?.isNotBlank() == true) {
+                        OutlinedButton(
+                            onClick = viewModel::syncNow,
+                            enabled = state.activeProjectSyncStatus !is GitHubSyncStatus.Syncing,
+                            modifier = Modifier.testTag("workspace_sync_now_button")
+                        ) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                when (val sync = state.activeProjectSyncStatus) {
+                                    is GitHubSyncStatus.Syncing -> "Syncing..."
+                                    is GitHubSyncStatus.Synced -> "Synced ${sync.commitSha.take(6)}"
+                                    is GitHubSyncStatus.Error -> "Sync Error"
+                                    GitHubSyncStatus.Idle ->
+                                        if (state.activeProjectGitHubConfig?.autoSyncEnabled == true) "Auto-Sync On"
+                                        else "Sync Now"
+                                }
+                            )
+                        }
                     }
                 }
 
@@ -467,6 +513,16 @@ fun WorkspaceScreen(
             dismissButton = {
                 TextButton(onClick = { pendingDeleteNode = null }) { Text("Cancel") }
             }
+        )
+    }
+
+    if (showGitHubPushDialog && state.activeProject != null) {
+        GitHubPushDialog(
+            state = state,
+            onVerifyToken = viewModel::verifyGitHubToken,
+            onPush = viewModel::pushActiveProjectToGitHub,
+            onCheckBuildStatus = viewModel::checkLatestGitHubWorkflowRun,
+            onDismiss = { showGitHubPushDialog = false }
         )
     }
 }

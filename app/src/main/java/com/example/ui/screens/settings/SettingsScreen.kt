@@ -1,6 +1,7 @@
 package com.example.ui.screens.settings
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,11 +20,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -48,18 +53,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.BuildConfig
+import com.example.R
 import com.example.domain.model.ThemeMode
+import com.example.ui.theme.BrandWordmarkStyle
 import com.example.ui.theme.JetBrainsMonoFamily
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
-    onOpenProviders: () -> Unit
+    onOpenProviders: () -> Unit,
+    onOpenMcpServers: () -> Unit,
+    onOpenGitHub: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var promptDraft by remember(state.settings.systemPrompt) {
@@ -77,6 +91,9 @@ fun SettingsScreen(
     }
     var providerDropdownOpen by remember { mutableStateOf(false) }
     var showPrivacyDialog by remember { mutableStateOf(false) }
+    var gitHubTokenDraft by remember(state.gitHubToken) { mutableStateOf(state.gitHubToken) }
+    var gitHubOwnerDraft by remember(state.gitHubDefaultOwner) { mutableStateOf(state.gitHubDefaultOwner) }
+    var showGitHubToken by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -120,6 +137,39 @@ fun SettingsScreen(
                     }
                 }
 
+                // IB CODER Identity Hero Card
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Image(
+                            painter = painterResource(R.drawable.ib_coder_logo),
+                            contentDescription = "IB CODER badge",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("IB CODER", style = BrandWordmarkStyle)
+                            Text(
+                                text = "v${BuildConfig.VERSION_NAME} • On-Device AI IDE",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
                 // Providers & API Keys Entry Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -152,6 +202,126 @@ fun SettingsScreen(
                             modifier = Modifier.testTag("settings_open_providers_button")
                         ) {
                             Text("Manage")
+                        }
+                    }
+                }
+
+                // MCP Servers Entry Card
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Rounded.Hub,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("MCP Servers", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "${state.mcpEnabledCount} enabled • ${state.mcpToolCount} tool(s) available to the agent",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Button(
+                            onClick = onOpenMcpServers,
+                            modifier = Modifier.testTag("settings_open_mcp_button")
+                        ) {
+                            Text("Connect")
+                        }
+                    }
+                }
+
+                // GitHub Integration Card
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.CloudUpload,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Text("GitHub & APK Build Integration", style = MaterialTheme.typography.titleMedium)
+                        }
+                        Text(
+                            "Push workspace projects to GitHub and build debug APKs via GitHub Actions without Play Store signing keys.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedTextField(
+                            value = gitHubTokenDraft,
+                            onValueChange = { gitHubTokenDraft = it },
+                            label = { Text("GitHub Personal Access Token") },
+                            placeholder = { Text("ghp_... or github_pat_...") },
+                            singleLine = true,
+                            visualTransformation = if (showGitHubToken) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                androidx.compose.material3.IconButton(onClick = { showGitHubToken = !showGitHubToken }) {
+                                    Icon(
+                                        if (showGitHubToken) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                        contentDescription = if (showGitHubToken) "Hide token" else "Show token"
+                                    )
+                                }
+                            },
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = JetBrainsMonoFamily),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("settings_github_token_input")
+                        )
+                        OutlinedTextField(
+                            value = gitHubOwnerDraft,
+                            onValueChange = { gitHubOwnerDraft = it },
+                            label = { Text("Default GitHub Owner / Username") },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = JetBrainsMonoFamily),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("settings_github_owner_input")
+                        )
+                        state.gitHubStatusMessage?.let { msg ->
+                            Text(
+                                text = msg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (msg.startsWith("Error:")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    viewModel.saveGitHubConfig(gitHubTokenDraft, gitHubOwnerDraft, verify = true)
+                                },
+                                enabled = !state.gitHubVerifying,
+                                modifier = Modifier.testTag("settings_github_verify_button")
+                            ) {
+                                Text(if (state.gitHubVerifying) "Verifying..." else "Save & Verify")
+                            }
+                            OutlinedButton(
+                                onClick = onOpenGitHub,
+                                modifier = Modifier.testTag("settings_open_github_hub_button")
+                            ) {
+                                Text("GitHub Hub")
+                            }
                         }
                     }
                 }
@@ -346,14 +516,14 @@ fun SettingsScreen(
     if (showPrivacyDialog) {
         AlertDialog(
             onDismissRequest = { showPrivacyDialog = false },
-            title = { Text("Privacy Policy — AI Coder") },
+            title = { Text("Privacy Policy — IB CODER") },
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     Text(
                         text = """
 • API Keys Stay On-Device: All API keys are encrypted via Android Keystore (AES-256-GCM) and stored only in app-private storage, excluded from cloud backups and device transfers. Keys are never logged.
 
-• Direct Provider Transmission: Prompts, messages, and tool-accessed workspace files are transmitted directly from your device solely to the AI provider endpoint you select. AI Coder operates no developer backend, analytics, or telemetry servers.
+• Direct Provider Transmission: Prompts, messages, and tool-accessed workspace files are transmitted directly from your device solely to the AI provider endpoint you select. IB CODER operates no developer backend, analytics, or telemetry servers.
 
 • Free-Tier Provider Notice: Some free-tier providers may log, retain, review, or use prompts and responses for abuse monitoring or model training. Review the chosen provider's privacy terms before sending sensitive code, or use a local endpoint such as Ollama.
                         """.trimIndent(),

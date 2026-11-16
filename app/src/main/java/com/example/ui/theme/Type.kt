@@ -8,6 +8,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.example.R
 
+val SilkscreenFamily = FontFamily(
+    Font(R.font.silkscreen, FontWeight.Normal),
+    Font(R.font.silkscreen, FontWeight.Bold)
+)
+
 val SpaceGroteskFamily = FontFamily(
     Font(R.font.space_grotesk, FontWeight.Normal),
     Font(R.font.space_grotesk, FontWeight.Medium),
@@ -28,22 +33,32 @@ val JetBrainsMonoFamily = FontFamily(
     Font(R.font.jetbrains_mono, FontWeight.Bold)
 )
 
+val BrandWordmarkStyle = TextStyle(
+    fontFamily = SilkscreenFamily,
+    fontWeight = FontWeight.Bold,
+    fontSize = 22.sp,
+    lineHeight = 26.sp,
+    letterSpacing = 1.2.sp
+)
+
 val AppTypography = Typography(
     displaySmall = TextStyle(
-        fontFamily = SpaceGroteskFamily,
+        fontFamily = SilkscreenFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 28.sp,
-        lineHeight = 34.sp
+        fontSize = 26.sp,
+        lineHeight = 32.sp,
+        letterSpacing = 0.8.sp
     ),
     headlineSmall = TextStyle(
         fontFamily = SpaceGroteskFamily,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Bold,
         fontSize = 22.sp,
-        lineHeight = 28.sp
+        lineHeight = 28.sp,
+        letterSpacing = (-0.2).sp
     ),
     titleLarge = TextStyle(
         fontFamily = SpaceGroteskFamily,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Bold,
         fontSize = 19.sp,
         lineHeight = 25.sp
     ),

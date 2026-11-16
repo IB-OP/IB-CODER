@@ -20,6 +20,6 @@ class OpenRouterAdapter(
     )
 
     override val extraHeaders: Map<String, String> = mapOf(
-        "X-Title" to "AI Coder Android"
+        "X-Title" to "IB CODER Android"
     )
 }

@@ -1,6 +1,6 @@
 {
-  "name": "AI Coder",
-  "description": "On-device AI coding agent and Android project builder with multi-provider SSE streaming, workspace tools, and Keystore security.",
+  "name": "IB CODER",
+  "description": "IB CODER — On-device AI coding agent, GitHub control hub, and Android project builder with multi-provider SSE streaming, MCP tools, and Keystore security.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

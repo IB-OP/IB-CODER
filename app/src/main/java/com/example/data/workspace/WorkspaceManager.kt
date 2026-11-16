@@ -101,6 +101,57 @@ class WorkspaceManager(
             project
         }
 
+    suspend fun importGitHubZipball(
+        projectName: String,
+        inputStream: InputStream,
+        existingProjectId: String? = null
+    ): WorkspaceProject = withContext(Dispatchers.IO) {
+        val project = if (!existingProjectId.isNullOrBlank()) {
+            getProject(existingProjectId) ?: createProject(projectName)
+        } else {
+            createProject(projectName)
+        }
+        val rootDir = File(project.rootPath)
+        if (!existingProjectId.isNullOrBlank() && rootDir.exists()) {
+            rootDir.listFiles()?.forEach { child ->
+                if (child.name != ".git") child.deleteRecursively()
+            }
+        }
+        if (!rootDir.exists()) rootDir.mkdirs()
+        val rootCanonical = rootDir.canonicalPath
+
+        ZipInputStream(inputStream.buffered()).use { zis ->
+            var entry: ZipEntry? = zis.nextEntry
+            while (entry != null) {
+                val rawName = entry.name.replace('\\', '/').trimStart('/')
+                // GitHub zipball nests all repo content inside "<owner>-<repo>-<sha>/"
+                val stripped = rawName.substringAfter('/', missingDelimiterValue = "")
+                if (stripped.isNotEmpty()) {
+                    val target = File(rootDir, stripped)
+                    val targetCanonical = target.canonicalPath
+                    if (!targetCanonical.startsWith(rootCanonical + File.separator) &&
+                        targetCanonical != rootCanonical
+                    ) {
+                        throw SecurityException("Blocked unsafe zip path: $stripped")
+                    }
+                    if (entry.isDirectory) {
+                        target.mkdirs()
+                    } else {
+                        target.parentFile?.mkdirs()
+                        target.outputStream().use { out ->
+                            zis.copyTo(out)
+                        }
+                    }
+                }
+                zis.closeEntry()
+                entry = zis.nextEntry
+            }
+        }
+
+        projectDao.touch(project.id, System.currentTimeMillis())
+        project
+    }
+
     suspend fun exportProjectToZip(projectId: String, outputStream: OutputStream) =
         withContext(Dispatchers.IO) {
             val project = projectDao.getById(projectId)

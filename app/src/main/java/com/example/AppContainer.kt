@@ -4,6 +4,10 @@ import android.content.Context
 import com.example.data.agent.AgentToolExecutor
 import com.example.data.agent.CodingAgentOrchestrator
 import com.example.data.local.db.AppDatabase
+import com.example.data.network.GitHubPushClient
+import com.example.data.network.GitHubSyncManager
+import com.example.data.network.McpClient
+import com.example.data.network.McpManager
 import com.example.data.network.ProviderRegistry
 import com.example.data.preferences.SettingsDataStore
 import com.example.data.repository.ChatRepository
@@ -54,6 +58,28 @@ class AppContainer(context: Context) {
         json = json
     )
 
+    val gitHubPushClient = GitHubPushClient(
+        okHttpClient = okHttpClient,
+        workspaceManager = workspaceManager,
+        json = json
+    )
+
+    val gitHubSyncManager = GitHubSyncManager(
+        settingsDataStore = settingsDataStore,
+        gitHubPushClient = gitHubPushClient
+    )
+
+    val mcpClient = McpClient(
+        okHttpClient = okHttpClient,
+        json = json
+    )
+
+    val mcpManager = McpManager(
+        settingsDataStore = settingsDataStore,
+        mcpClient = mcpClient,
+        json = json
+    )
+
     val toolExecutor = AgentToolExecutor(
         workspaceManager = workspaceManager,
         json = json
@@ -69,6 +95,8 @@ class AppContainer(context: Context) {
         settingsDataStore = settingsDataStore,
         chatRepository = chatRepository,
         toolExecutor = toolExecutor,
-        workspaceManager = workspaceManager
+        workspaceManager = workspaceManager,
+        mcpManager = mcpManager,
+        gitHubSyncManager = gitHubSyncManager
     )
 }

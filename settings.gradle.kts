@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "AI Coder"
+rootProject.name = "IB CODER"
 
 include(":app")

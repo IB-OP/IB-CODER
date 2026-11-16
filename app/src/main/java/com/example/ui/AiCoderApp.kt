@@ -7,10 +7,12 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SmartToy
+import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Settings
@@ -27,7 +29,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -36,13 +40,21 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.AppContainer
+import com.example.domain.model.AppAccountSession
 import com.example.ui.navigation.ChatRoute
+import com.example.ui.navigation.GitHubRoute
+import com.example.ui.navigation.McpServersRoute
 import com.example.ui.navigation.ProvidersRoute
 import com.example.ui.navigation.SessionsRoute
 import com.example.ui.navigation.SettingsRoute
 import com.example.ui.navigation.WorkspaceRoute
+import com.example.ui.screens.auth.SignInGateScreen
 import com.example.ui.screens.chat.ChatScreen
 import com.example.ui.screens.chat.ChatViewModel
+import com.example.ui.screens.github.GitHubScreen
+import com.example.ui.screens.github.GitHubViewModel
+import com.example.ui.screens.mcp.McpServersScreen
+import com.example.ui.screens.mcp.McpServersViewModel
 import com.example.ui.screens.providers.ProvidersScreen
 import com.example.ui.screens.providers.ProvidersViewModel
 import com.example.ui.screens.sessions.SessionsScreen
@@ -62,18 +74,28 @@ private data class TopLevelTab(
 
 @Composable
 fun AiCoderApp(container: AppContainer) {
+    val accountSession by container.settingsDataStore.appAccountSessionFlow
+        .collectAsStateWithLifecycle(initialValue = AppAccountSession())
+
+    if (accountSession.requireSignInOnLaunch && !accountSession.isSignedIn) {
+        SignInGateScreen(container = container, session = accountSession)
+        return
+    }
+
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
 
     val tabs = listOf(
         TopLevelTab(ChatRoute, "Chat", Icons.Rounded.SmartToy, Icons.Outlined.SmartToy, "nav_chat"),
-        TopLevelTab(WorkspaceRoute, "Workspace", Icons.Rounded.Folder, Icons.Outlined.Folder, "nav_workspace"),
+        TopLevelTab(WorkspaceRoute, "Files", Icons.Rounded.Folder, Icons.Outlined.Folder, "nav_workspace"),
+        TopLevelTab(GitHubRoute, "GitHub", Icons.Rounded.CloudSync, Icons.Outlined.CloudSync, "nav_github"),
         TopLevelTab(SessionsRoute, "Sessions", Icons.Rounded.Forum, Icons.Outlined.Forum, "nav_sessions"),
         TopLevelTab(SettingsRoute, "Settings", Icons.Rounded.Settings, Icons.Outlined.Settings, "nav_settings")
     )
 
-    val isProvidersRoute = currentDestination?.hasRoute<ProvidersRoute>() == true
+    val isSubRoute = currentDestination?.hasRoute<ProvidersRoute>() == true ||
+        currentDestination?.hasRoute<McpServersRoute>() == true
 
     fun navigateTopLevel(route: Any) {
         navController.navigate(route) {
@@ -87,113 +109,149 @@ fun AiCoderApp(container: AppContainer) {
 
     val chatViewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory(container))
     val workspaceViewModel: WorkspaceViewModel = viewModel(factory = WorkspaceViewModel.Factory(container))
+    val gitHubViewModel: GitHubViewModel = viewModel(factory = GitHubViewModel.Factory(container))
     val sessionsViewModel: SessionsViewModel = viewModel(factory = SessionsViewModel.Factory(container))
     val settingsViewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory(container))
     val providersViewModel: ProvidersViewModel = viewModel(factory = ProvidersViewModel.Factory(container))
+    val mcpServersViewModel: McpServersViewModel = viewModel(factory = McpServersViewModel.Factory(container))
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val useRail = maxWidth >= 700.dp
 
         Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        bottomBar = {
-            if (!useRail && !isProvidersRoute) {
-                NavigationBar {
-                    tabs.forEach { tab ->
-                        val selected = when (tab.route) {
-                            ChatRoute -> currentDestination?.hasRoute<ChatRoute>() == true
-                            WorkspaceRoute -> currentDestination?.hasRoute<WorkspaceRoute>() == true
-                            SessionsRoute -> currentDestination?.hasRoute<SessionsRoute>() == true
-                            SettingsRoute -> currentDestination?.hasRoute<SettingsRoute>() == true
-                            else -> false
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            bottomBar = {
+                if (!useRail && !isSubRoute) {
+                    NavigationBar {
+                        tabs.forEach { tab ->
+                            val selected = when (tab.route) {
+                                ChatRoute -> currentDestination?.hasRoute<ChatRoute>() == true
+                                WorkspaceRoute -> currentDestination?.hasRoute<WorkspaceRoute>() == true
+                                GitHubRoute -> currentDestination?.hasRoute<GitHubRoute>() == true
+                                SessionsRoute -> currentDestination?.hasRoute<SessionsRoute>() == true
+                                SettingsRoute -> currentDestination?.hasRoute<SettingsRoute>() == true
+                                else -> false
+                            }
+                            NavigationBarItem(
+                                selected = selected,
+                                onClick = { navigateTopLevel(tab.route) },
+                                icon = {
+                                    Icon(
+                                        imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
+                                        contentDescription = tab.label
+                                    )
+                                },
+                                label = {
+                                    Text(
+                                        tab.label,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                modifier = Modifier.testTag(tab.tag)
+                            )
                         }
-                        NavigationBarItem(
-                            selected = selected,
-                            onClick = { navigateTopLevel(tab.route) },
-                            icon = {
-                                Icon(
-                                    imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
-                                    contentDescription = tab.label
-                                )
-                            },
-                            label = { Text(tab.label) },
-                            modifier = Modifier.testTag(tab.tag)
-                        )
                     }
                 }
             }
-        }
-    ) { innerPadding ->
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            if (useRail && !isProvidersRoute) {
-                NavigationRail {
-                    tabs.forEach { tab ->
-                        val selected = when (tab.route) {
-                            ChatRoute -> currentDestination?.hasRoute<ChatRoute>() == true
-                            WorkspaceRoute -> currentDestination?.hasRoute<WorkspaceRoute>() == true
-                            SessionsRoute -> currentDestination?.hasRoute<SessionsRoute>() == true
-                            SettingsRoute -> currentDestination?.hasRoute<SettingsRoute>() == true
-                            else -> false
+        ) { innerPadding ->
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                if (useRail && !isSubRoute) {
+                    NavigationRail {
+                        tabs.forEach { tab ->
+                            val selected = when (tab.route) {
+                                ChatRoute -> currentDestination?.hasRoute<ChatRoute>() == true
+                                WorkspaceRoute -> currentDestination?.hasRoute<WorkspaceRoute>() == true
+                                GitHubRoute -> currentDestination?.hasRoute<GitHubRoute>() == true
+                                SessionsRoute -> currentDestination?.hasRoute<SessionsRoute>() == true
+                                SettingsRoute -> currentDestination?.hasRoute<SettingsRoute>() == true
+                                else -> false
+                            }
+                            NavigationRailItem(
+                                selected = selected,
+                                onClick = { navigateTopLevel(tab.route) },
+                                icon = {
+                                    Icon(
+                                        imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
+                                        contentDescription = tab.label
+                                    )
+                                },
+                                label = {
+                                    Text(
+                                        tab.label,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                modifier = Modifier.testTag(tab.tag)
+                            )
                         }
-                        NavigationRailItem(
-                            selected = selected,
-                            onClick = { navigateTopLevel(tab.route) },
-                            icon = {
-                                Icon(
-                                    imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
-                                    contentDescription = tab.label
-                                )
-                            },
-                            label = { Text(tab.label) },
-                            modifier = Modifier.testTag(tab.tag)
-                        )
                     }
                 }
-            }
 
-            Box(modifier = Modifier.weight(1f).fillMaxSize()) {
-                NavHost(
-                    navController = navController,
-                    startDestination = ChatRoute
-                ) {
-                    composable<ChatRoute> {
-                        ChatScreen(
-                            viewModel = chatViewModel,
-                            onOpenProviders = { navController.navigate(ProvidersRoute) },
-                            onOpenWorkspace = { navigateTopLevel(WorkspaceRoute) }
-                        )
-                    }
-                    composable<WorkspaceRoute> {
-                        WorkspaceScreen(
-                            viewModel = workspaceViewModel,
-                            onAskAgent = { navigateTopLevel(ChatRoute) }
-                        )
-                    }
-                    composable<SessionsRoute> {
-                        SessionsScreen(
-                            viewModel = sessionsViewModel,
-                            onOpenChat = { navigateTopLevel(ChatRoute) }
-                        )
-                    }
-                    composable<SettingsRoute> {
-                        SettingsScreen(
-                            viewModel = settingsViewModel,
-                            onOpenProviders = { navController.navigate(ProvidersRoute) }
-                        )
-                    }
-                    composable<ProvidersRoute> {
-                        ProvidersScreen(
-                            viewModel = providersViewModel,
-                            onNavigateBack = { navController.popBackStack() }
-                        )
+                Box(modifier = Modifier.weight(1f).fillMaxSize()) {
+                    NavHost(
+                        navController = navController,
+                        startDestination = ChatRoute
+                    ) {
+                        composable<ChatRoute> {
+                            ChatScreen(
+                                viewModel = chatViewModel,
+                                onOpenProviders = { navController.navigate(ProvidersRoute) },
+                                onOpenWorkspace = { navigateTopLevel(WorkspaceRoute) },
+                                onOpenMcpServers = { navController.navigate(McpServersRoute) },
+                                onOpenGitHub = { navigateTopLevel(GitHubRoute) }
+                            )
+                        }
+                        composable<WorkspaceRoute> {
+                            WorkspaceScreen(
+                                viewModel = workspaceViewModel,
+                                onAskAgent = { navigateTopLevel(ChatRoute) }
+                            )
+                        }
+                        composable<GitHubRoute> {
+                            GitHubScreen(
+                                viewModel = gitHubViewModel,
+                                onLaunchAiFix = { projectId, prompt ->
+                                    chatViewModel.promptAiToFixBug(projectId, prompt)
+                                    navigateTopLevel(ChatRoute)
+                                },
+                                onOpenWorkspace = { navigateTopLevel(WorkspaceRoute) }
+                            )
+                        }
+                        composable<SessionsRoute> {
+                            SessionsScreen(
+                                viewModel = sessionsViewModel,
+                                onOpenChat = { navigateTopLevel(ChatRoute) }
+                            )
+                        }
+                        composable<SettingsRoute> {
+                            SettingsScreen(
+                                viewModel = settingsViewModel,
+                                onOpenProviders = { navController.navigate(ProvidersRoute) },
+                                onOpenMcpServers = { navController.navigate(McpServersRoute) },
+                                onOpenGitHub = { navigateTopLevel(GitHubRoute) }
+                            )
+                        }
+                        composable<ProvidersRoute> {
+                            ProvidersScreen(
+                                viewModel = providersViewModel,
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable<McpServersRoute> {
+                            McpServersScreen(
+                                viewModel = mcpServersViewModel,
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
                     }
                 }
             }
         }
-    }
     }
 }

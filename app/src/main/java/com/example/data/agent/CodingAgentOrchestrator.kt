@@ -1,5 +1,7 @@
 package com.example.data.agent
 
+import com.example.data.network.GitHubSyncManager
+import com.example.data.network.McpManager
 import com.example.data.network.ProviderRegistry
 import com.example.data.preferences.SettingsDataStore
 import com.example.data.repository.ChatRepository
@@ -22,7 +24,9 @@ class CodingAgentOrchestrator(
     private val settingsDataStore: SettingsDataStore,
     private val chatRepository: ChatRepository,
     private val toolExecutor: AgentToolExecutor,
-    private val workspaceManager: WorkspaceManager
+    private val workspaceManager: WorkspaceManager,
+    private val mcpManager: McpManager,
+    private val gitHubSyncManager: GitHubSyncManager
 ) {
     suspend fun runAgentTurn(
         sessionId: String,
@@ -59,22 +63,42 @@ class CodingAgentOrchestrator(
         )
         chatRepository.saveMessage(userMessage)
 
+        val resolvedMcpTools = mcpManager.getEnabledResolvedTools()
+        val mcpLookup = resolvedMcpTools.associateBy { it.exposedName }
+
         val projectSummary = buildWorkspaceSummary(projectId)
+        val mcpSummary = if (resolvedMcpTools.isNotEmpty()) {
+            buildString {
+                appendLine("Connected MCP Tools (callable alongside workspace tools):")
+                for (t in resolvedMcpTools) {
+                    appendLine("  - ${t.exposedName} (${t.serverName}): ${t.description}")
+                }
+            }.trimEnd()
+        } else {
+            ""
+        }
+
         val fullSystemPrompt = buildString {
             append(settings.systemPrompt)
             append("\n\n")
             append(projectSummary)
+            if (mcpSummary.isNotBlank()) {
+                append("\n\n")
+                append(mcpSummary)
+            }
         }
 
         val toolSupport = adapter.modelToolSupport(modelId)
         val toolsToSend = if (toolSupport == ToolSupportStatus.UNSUPPORTED) {
             emptyList()
         } else {
-            toolExecutor.toolDefinitions
+            toolExecutor.toolDefinitions + mcpManager.toToolDefinitions(resolvedMcpTools)
         }
 
         val maxLoops = 24
-        for (step in 0 until maxLoops) {
+        var workspaceModified = false
+        try {
+            for (step in 0 until maxLoops) {
             val history = chatRepository.getMessages(sessionId)
             val dtoMessages = buildList {
                 add(ChatMessageDto(role = ChatRole.SYSTEM, content = fullSystemPrompt))
@@ -195,32 +219,59 @@ class CodingAgentOrchestrator(
             // Execute each requested tool inline
             for (idx in toolRecords.indices) {
                 val tc = toolRecords[idx]
-                if (tc.name == "delete_file") {
-                    toolRecords[idx] = tc.copy(status = ToolExecutionStatus.AWAITING_CONFIRMATION)
-                    onStreamingMessageUpdated(currentUiMessage(streaming = true))
+                val mcpTool = mcpLookup[tc.name]
+                if (mcpTool != null) {
+                    val (ok, output) = mcpManager.executeMcpTool(mcpTool, tc.argumentsJson)
+                    toolRecords[idx] = tc.copy(
+                        status = if (ok) ToolExecutionStatus.SUCCESS else ToolExecutionStatus.ERROR,
+                        resultText = output
+                    )
+                } else {
+                    if (tc.name == "delete_file") {
+                        toolRecords[idx] = tc.copy(status = ToolExecutionStatus.AWAITING_CONFIRMATION)
+                        onStreamingMessageUpdated(currentUiMessage(streaming = true))
+                    }
+                    val outcome = toolExecutor.execute(
+                        projectId = projectId,
+                        toolCallId = tc.id,
+                        toolName = tc.name,
+                        argumentsJson = tc.argumentsJson,
+                        confirmDeletion = confirmDeletion
+                    )
+                    val finalStatus = when {
+                        outcome.wasCancelled -> ToolExecutionStatus.CANCELLED
+                        outcome.success -> {
+                            if (tc.name in MUTATING_TOOLS) workspaceModified = true
+                            ToolExecutionStatus.SUCCESS
+                        }
+                        else -> ToolExecutionStatus.ERROR
+                    }
+                    toolRecords[idx] = tc.copy(
+                        status = finalStatus,
+                        resultText = outcome.output
+                    )
                 }
-                val outcome = toolExecutor.execute(
-                    projectId = projectId,
-                    toolCallId = tc.id,
-                    toolName = tc.name,
-                    argumentsJson = tc.argumentsJson,
-                    confirmDeletion = confirmDeletion
-                )
-                val finalStatus = when {
-                    outcome.wasCancelled -> ToolExecutionStatus.CANCELLED
-                    outcome.success -> ToolExecutionStatus.SUCCESS
-                    else -> ToolExecutionStatus.ERROR
-                }
-                toolRecords[idx] = tc.copy(
-                    status = finalStatus,
-                    resultText = outcome.output
-                )
                 onStreamingMessageUpdated(currentUiMessage(streaming = true))
             }
 
             chatRepository.saveMessage(currentUiMessage(streaming = false))
             onStreamingMessageUpdated(null)
+            }
+        } finally {
+            if (workspaceModified && !projectId.isNullOrBlank()) {
+                val summary = userText.trim().lineSequence().firstOrNull()?.take(60)
+                    ?.ifBlank { "IB CODER changes" } ?: "IB CODER changes"
+                gitHubSyncManager.scheduleAutoSync(
+                    projectId = projectId,
+                    commitReason = "IB CODER: $summary",
+                    immediate = true
+                )
+            }
         }
+    }
+
+    companion object {
+        private val MUTATING_TOOLS = setOf("write_file", "edit_file", "create_folder", "delete_file")
     }
 
     private suspend fun buildWorkspaceSummary(projectId: String?): String {

@@ -2,7 +2,7 @@ package com.example.domain.prompt
 
 object DefaultSystemPrompt {
     val TEXT = """
-You are AI Coder, an expert autonomous software engineering and Android development agent running inside a mobile IDE workspace.
+You are IB CODER, an expert autonomous software engineering and Android development agent running inside a mobile IDE workspace.
 
 You have access to project workspace tools:
 - list_files: Inspect directory contents

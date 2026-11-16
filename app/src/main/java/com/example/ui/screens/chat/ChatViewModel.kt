@@ -5,16 +5,20 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.AppContainer
 import com.example.data.agent.CodingAgentOrchestrator
+import com.example.data.network.GitHubSyncManager
 import com.example.data.network.ProviderRegistry
 import com.example.data.preferences.SettingsDataStore
 import com.example.data.repository.ChatRepository
 import com.example.data.workspace.WorkspaceManager
 import com.example.domain.model.ChatMessageUi
 import com.example.domain.model.ChatSession
+import com.example.domain.model.GitHubProjectConfig
+import com.example.domain.model.GitHubSyncStatus
 import com.example.domain.model.PendingDeletionConfirmation
 import com.example.domain.model.ProviderConfig
 import com.example.domain.model.ProviderMetadata
 import com.example.domain.model.ToolSupportStatus
+import com.example.domain.model.WorkflowFailureAlert
 import com.example.domain.model.WorkspaceProject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -45,6 +49,11 @@ data class ChatUiState(
     val selectedModelId: String = "",
     val providerOptions: List<ProviderOptionUi> = emptyList(),
     val toolSupportStatus: ToolSupportStatus = ToolSupportStatus.SUPPORTED,
+    val mcpEnabledServerCount: Int = 0,
+    val mcpToolCount: Int = 0,
+    val activeGitHubConfig: GitHubProjectConfig? = null,
+    val activeSyncStatus: GitHubSyncStatus = GitHubSyncStatus.Idle,
+    val pendingWorkflowAlert: WorkflowFailureAlert? = null,
     val pendingDeletion: PendingDeletionConfirmation? = null,
     val errorBanner: String? = null
 )
@@ -56,7 +65,8 @@ class ChatViewModel(
     private val chatRepository: ChatRepository,
     private val workspaceManager: WorkspaceManager,
     private val settingsDataStore: SettingsDataStore,
-    private val providerRegistry: ProviderRegistry
+    private val providerRegistry: ProviderRegistry,
+    private val gitHubSyncManager: GitHubSyncManager
 ) : ViewModel() {
 
     private val streamingMessage = MutableStateFlow<ChatMessageUi?>(null)
@@ -64,6 +74,7 @@ class ChatViewModel(
     private val selectedProviderOverride = MutableStateFlow<String?>(null)
     private val selectedModelOverride = MutableStateFlow<String?>(null)
     private val pendingDeletion = MutableStateFlow<PendingDeletionConfirmation?>(null)
+    private val pendingWorkflowAlert = MutableStateFlow<WorkflowFailureAlert?>(null)
     private val errorBanner = MutableStateFlow<String?>(null)
 
     private var activeGenerationJob: Job? = null
@@ -111,12 +122,29 @@ class ChatViewModel(
                 selectedProviderOverride,
                 selectedModelOverride,
                 pendingDeletion,
-                errorBanner
-            ) { provOverride, modelOverride, deletion, err ->
-                OverrideBundle(provOverride, modelOverride, deletion, err)
+                errorBanner,
+                settingsDataStore.mcpServersFlow
+            ) { provOverride, modelOverride, deletion, err, mcpServers ->
+                val enabledMcp = mcpServers.filter { it.enabled }
+                OverrideBundle(
+                    providerId = provOverride,
+                    modelId = modelOverride,
+                    deletion = deletion,
+                    error = err,
+                    mcpServerCount = enabledMcp.size,
+                    mcpToolCount = enabledMcp.sumOf { it.discoveredTools.size }
+                )
             }
 
-            combine(sessionBundleFlow, workspaceBundleFlow, overrideBundleFlow) { sBundle, wBundle, oBundle ->
+            val githubBundleFlow = combine(
+                settingsDataStore.githubProjectConfigsFlow,
+                gitHubSyncManager.syncStatuses,
+                pendingWorkflowAlert
+            ) { ghConfigs, syncStatuses, alert ->
+                Triple(ghConfigs, syncStatuses, alert)
+            }
+
+            combine(sessionBundleFlow, workspaceBundleFlow, overrideBundleFlow, githubBundleFlow) { sBundle, wBundle, oBundle, ghBundle ->
                 val providerId = oBundle.providerId
                     ?: sBundle.session?.providerId?.takeIf { it.isNotBlank() }
                     ?: wBundle.defaultProviderId
@@ -138,6 +166,9 @@ class ChatViewModel(
                 }
 
                 val toolStatus = adapter?.modelToolSupport(modelId) ?: ToolSupportStatus.UNKNOWN
+                val activeProjId = wBundle.activeProject?.id
+                val activeGhCfg = activeProjId?.let { ghBundle.first[it] }?.takeIf { it.repo.isNotBlank() }
+                val activeSync = activeProjId?.let { ghBundle.second[it] } ?: GitHubSyncStatus.Idle
 
                 ChatUiState(
                     currentSession = sBundle.session,
@@ -150,11 +181,22 @@ class ChatViewModel(
                     selectedModelId = modelId,
                     providerOptions = options,
                     toolSupportStatus = toolStatus,
+                    mcpEnabledServerCount = oBundle.mcpServerCount,
+                    mcpToolCount = oBundle.mcpToolCount,
+                    activeGitHubConfig = activeGhCfg,
+                    activeSyncStatus = activeSync,
+                    pendingWorkflowAlert = ghBundle.third,
                     pendingDeletion = oBundle.deletion,
                     errorBanner = oBundle.error
                 )
             }.collect { state ->
                 _uiState.value = state
+            }
+        }
+
+        viewModelScope.launch {
+            gitHubSyncManager.workflowFailureAlerts.collect { alert ->
+                pendingWorkflowAlert.value = alert
             }
         }
     }
@@ -201,6 +243,40 @@ class ChatViewModel(
     }
 
     fun sendMessage(text: String) {
+        sendMessageInternal(text = text, overrideProjectId = null)
+    }
+
+    fun promptAiToFixBug(projectId: String?, prompt: String) {
+        stopGeneration()
+        container.selectedSessionId.value = null
+        pendingWorkflowAlert.value = null
+        viewModelScope.launch {
+            if (!projectId.isNullOrBlank()) {
+                settingsDataStore.setActiveProjectId(projectId)
+            }
+            sendMessageInternal(text = prompt, overrideProjectId = projectId)
+        }
+    }
+
+    fun fixPendingWorkflowAlert() {
+        val alert = pendingWorkflowAlert.value ?: return
+        promptAiToFixBug(alert.projectId, alert.aiFixPrompt)
+    }
+
+    fun dismissWorkflowAlert() {
+        pendingWorkflowAlert.value = null
+    }
+
+    fun syncActiveProjectNow() {
+        val projectId = _uiState.value.activeProject?.id ?: return
+        viewModelScope.launch {
+            gitHubSyncManager.syncNow(projectId, "Manual sync from Chat").onFailure { err ->
+                errorBanner.value = err.message ?: "GitHub sync failed."
+            }
+        }
+    }
+
+    private fun sendMessageInternal(text: String, overrideProjectId: String?) {
         val trimmed = text.trim()
         if (trimmed.isEmpty() || isGenerating.value) return
 
@@ -217,7 +293,7 @@ class ChatViewModel(
 
         activeGenerationJob = viewModelScope.launch {
             try {
-                val projectId = currentState.activeProject?.id
+                val projectId = overrideProjectId ?: currentState.activeProject?.id
                 val sessionId = container.selectedSessionId.value ?: run {
                     val created = chatRepository.createSession(
                         title = trimmed.lineSequence().firstOrNull()?.take(48) ?: "New Chat",
@@ -296,7 +372,9 @@ class ChatViewModel(
         val providerId: String?,
         val modelId: String?,
         val deletion: PendingDeletionConfirmation?,
-        val error: String?
+        val error: String?,
+        val mcpServerCount: Int,
+        val mcpToolCount: Int
     )
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
@@ -308,7 +386,8 @@ class ChatViewModel(
                 chatRepository = container.chatRepository,
                 workspaceManager = container.workspaceManager,
                 settingsDataStore = container.settingsDataStore,
-                providerRegistry = container.providerRegistry
+                providerRegistry = container.providerRegistry,
+                gitHubSyncManager = container.gitHubSyncManager
             ) as T
         }
     }
