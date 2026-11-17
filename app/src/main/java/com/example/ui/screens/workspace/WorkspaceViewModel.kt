@@ -377,6 +377,11 @@ class WorkspaceViewModel(
         isEditingState.value = false
     }
 
+    fun closeAllTabs() {
+        openTabsState.value = emptyList()
+        closeFileViewer()
+    }
+
     fun setSidebarSearchQuery(query: String) {
         sidebarSearchQueryState.value = query
     }
@@ -428,7 +433,7 @@ class WorkspaceViewModel(
                 workspaceManager.writeFile(projectId, clean, "")
                 refreshTreeInternal(projectId)
                 openFile(clean)
-                isEditingState.value = true
+                isEditingState.value = false
                 statusState.value = "Created '$clean'."
                 gitHubSyncManager.scheduleAutoSync(projectId, "Create $clean")
             }.onFailure {

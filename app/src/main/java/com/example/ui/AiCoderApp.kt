@@ -132,8 +132,7 @@ private data class SidebarNavOption(
 
 @Composable
 fun AiCoderApp(container: AppContainer) {
-    val authFlow = remember(container) { container.cloudAccountVaultRepository.authStateFlow() }
-    val currentUser by authFlow.collectAsStateWithLifecycle(initialValue = null)
+    val currentUser by container.cloudAccountVaultRepository.authState.collectAsStateWithLifecycle()
 
     if (currentUser == null) {
         SignInGateScreen(container = container)

@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -19,9 +20,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -37,40 +39,35 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddComment
 import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.ChevronLeft
-import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
-import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.CloudUpload
-import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.DriveFileRenameOutline
-import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderCopy
 import androidx.compose.material.icons.rounded.FolderOpen
-import androidx.compose.material.icons.rounded.Hub
-import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -93,10 +90,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -118,9 +116,9 @@ import com.example.ui.theme.IdeStyleBlue
 import com.example.ui.theme.JetBrainsMonoFamily
 
 internal enum class IdeSidebarSection(val label: String) {
-    EXPLORER("PROJECTS"),
+    EXPLORER("FILES"),
     SEARCH("SEARCH"),
-    SOURCE_CONTROL("SOURCE CONTROL")
+    SOURCE_CONTROL("GITHUB")
 }
 
 @Composable
@@ -145,51 +143,149 @@ internal fun IdeTopBar(
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.statusBars)
     ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                if (onOpenSidebar != null) {
-                    IconButton(
-                        onClick = onOpenSidebar,
+        BoxWithConstraints {
+            val showWordmark = maxWidth >= 430.dp
+
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .padding(horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (onOpenSidebar != null) {
+                        IconButton(
+                            onClick = onOpenSidebar,
+                            modifier = Modifier
+                                .size(44.dp)
+                                .testTag("ide_menu_button")
+                        ) {
+                            Icon(
+                                Icons.Rounded.Menu,
+                                contentDescription = "Open navigation sidebar",
+                                modifier = Modifier.size(21.dp)
+                            )
+                        }
+                    }
+
+                    Image(
+                        painter = painterResource(R.drawable.ib_coder_logo),
+                        contentDescription = "IB CODER",
+                        contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(40.dp)
-                            .testTag("ide_menu_button")
-                    ) {
-                        Icon(
-                            Icons.Rounded.Menu,
-                            contentDescription = "Open navigation sidebar",
-                            modifier = Modifier.size(20.dp)
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                    )
+
+                    if (showWordmark) {
+                        Text(
+                            text = "IB CODER",
+                            style = BrandWordmarkStyle.copy(fontSize = 15.sp),
+                            maxLines = 1
                         )
                     }
-                }
-                Image(
-                    painter = painterResource(R.drawable.ib_coder_logo),
-                    contentDescription = "IB CODER",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                )
-                Text(
-                    text = "IB CODER",
-                    style = BrandWordmarkStyle.copy(fontSize = 16.sp),
-                    maxLines = 1
-                )
 
-                // Active Project Selector Pill
-                Box(modifier = Modifier.weight(1f, fill = false)) {
+                    // Active Project Selector Pill (fluid width so portrait phones never clip)
+                    Box(modifier = Modifier.weight(1f)) {
+                        Surface(
+                            onClick = { projectMenuOpen = true },
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier
+                                .widthIn(min = 84.dp, max = 220.dp)
+                                .testTag("ide_project_selector")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.FolderOpen,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = activeProject?.name ?: "No Project",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontFamily = JetBrainsMonoFamily,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                Icon(
+                                    Icons.Rounded.ExpandMore,
+                                    contentDescription = "Switch project",
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = projectMenuOpen,
+                            onDismissRequest = { projectMenuOpen = false }
+                        ) {
+                            allProjects.forEach { proj ->
+                                DropdownMenuItem(
+                                    text = { Text(proj.name, fontFamily = JetBrainsMonoFamily) },
+                                    leadingIcon = {
+                                        if (proj.id == activeProject?.id) {
+                                            Icon(
+                                                Icons.Rounded.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        onSelectProject(proj.id)
+                                        projectMenuOpen = false
+                                    }
+                                )
+                            }
+                            if (allProjects.isNotEmpty()) HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("+ New Project") },
+                                leadingIcon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+                                onClick = {
+                                    projectMenuOpen = false
+                                    onNewProject()
+                                }
+                            )
+                            if (activeProject != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Rename Project") },
+                                    leadingIcon = { Icon(Icons.Rounded.DriveFileRenameOutline, contentDescription = null) },
+                                    onClick = {
+                                        projectMenuOpen = false
+                                        onRenameProject()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(if (activeProject.isDeviceFolder) "Unlink Folder" else "Delete Project") },
+                                    leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+                                    onClick = {
+                                        projectMenuOpen = false
+                                        onDeleteProject()
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // Active AI Model Pill
                     Surface(
-                        onClick = { projectMenuOpen = true },
-                        color = MaterialTheme.colorScheme.surfaceContainer,
-                        shape = RoundedCornerShape(4.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier.testTag("ide_project_selector")
+                        onClick = onSwitchModel,
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                        modifier = Modifier
+                            .widthIn(max = 148.dp)
+                            .testTag("ide_model_pill")
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
@@ -197,119 +293,153 @@ internal fun IdeTopBar(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(
-                                Icons.Rounded.FolderOpen,
-                                contentDescription = null,
+                                Icons.Rounded.Public,
+                                contentDescription = "Live Web + Model",
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(13.dp)
                             )
                             Text(
-                                text = activeProject?.name ?: "No Project",
-                                style = MaterialTheme.typography.labelMedium,
+                                text = modelId.ifBlank { providerId }.take(16),
+                                style = MaterialTheme.typography.labelSmall,
                                 fontFamily = JetBrainsMonoFamily,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.width(105.dp)
+                                overflow = TextOverflow.Ellipsis
                             )
+                        }
+                    }
+
+                    if (activeProject != null) {
+                        IconButton(
+                            onClick = onRefreshTree,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .testTag("workspace_refresh_button")
+                        ) {
                             Icon(
-                                Icons.Rounded.ExpandMore,
-                                contentDescription = "Switch project",
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                    }
-
-                    DropdownMenu(
-                        expanded = projectMenuOpen,
-                        onDismissRequest = { projectMenuOpen = false }
-                    ) {
-                        allProjects.forEach { proj ->
-                            DropdownMenuItem(
-                                text = { Text(proj.name, fontFamily = JetBrainsMonoFamily) },
-                                leadingIcon = {
-                                    if (proj.id == activeProject?.id) {
-                                        Icon(Icons.Rounded.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                    }
-                                },
-                                onClick = {
-                                    onSelectProject(proj.id)
-                                    projectMenuOpen = false
-                                }
-                            )
-                        }
-                        if (allProjects.isNotEmpty()) HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("+ New Project") },
-                            leadingIcon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                            onClick = {
-                                projectMenuOpen = false
-                                onNewProject()
-                            }
-                        )
-                        if (activeProject != null) {
-                            DropdownMenuItem(
-                                text = { Text("Rename Project") },
-                                leadingIcon = { Icon(Icons.Rounded.DriveFileRenameOutline, contentDescription = null) },
-                                onClick = {
-                                    projectMenuOpen = false
-                                    onRenameProject()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text(if (activeProject.isDeviceFolder) "Unlink Folder" else "Delete Project") },
-                                leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
-                                onClick = {
-                                    projectMenuOpen = false
-                                    onDeleteProject()
-                                }
+                                Icons.Rounded.Refresh,
+                                contentDescription = "Refresh files",
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
+    }
+}
 
-                Spacer(Modifier.weight(1f))
-
-                // Active AI Model Pill
-                Surface(
-                    onClick = onSwitchModel,
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                    shape = RoundedCornerShape(4.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-                    modifier = Modifier.testTag("ide_model_pill")
+@Composable
+internal fun WorkspaceQuickActionBar(
+    hasActiveProject: Boolean,
+    fileCount: Int,
+    filesOpen: Boolean,
+    hasOpenFile: Boolean,
+    openFileName: String?,
+    onToggleFiles: () -> Unit,
+    onNewFile: () -> Unit,
+    onCommitGitHub: () -> Unit,
+    onNewSession: () -> Unit,
+    onOpenFullChat: () -> Unit,
+    onCloseOpenFile: () -> Unit
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = onToggleFiles,
+                    shape = RoundedCornerShape(6.dp),
+                    colors = if (filesOpen) {
+                        ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    } else {
+                        ButtonDefaults.filledTonalButtonColors()
+                    },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .heightIn(min = 38.dp)
+                        .testTag("workspace_show_files_button")
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    Icon(
+                        Icons.Rounded.FolderCopy,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = if (hasActiveProject && fileCount > 0) "Files ($fileCount)" else "Files",
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1
+                    )
+                }
+
+                if (hasActiveProject) {
+                    OutlinedButton(
+                        onClick = onCommitGitHub,
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .heightIn(min = 38.dp)
+                            .testTag("workspace_push_github_button")
                     ) {
-                        Icon(
-                            Icons.Rounded.Public,
-                            contentDescription = "Live Web + Model",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Text(
-                            text = modelId.ifBlank { providerId }.take(18),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = JetBrainsMonoFamily,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Icon(Icons.Rounded.CloudUpload, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("Commit", style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                    }
+
+                    OutlinedButton(
+                        onClick = onNewFile,
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .heightIn(min = 38.dp)
+                            .testTag("workspace_new_file_button")
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.NoteAdd, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text("New File", style = MaterialTheme.typography.labelMedium, maxLines = 1)
                     }
                 }
 
-                if (activeProject != null) {
-                    IconButton(
-                        onClick = onRefreshTree,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .testTag("workspace_refresh_button")
-                    ) {
-                        Icon(
-                            Icons.Rounded.Refresh,
-                            contentDescription = "Refresh files",
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                AssistChip(
+                    onClick = onNewSession,
+                    label = { Text("New Session", maxLines = 1) },
+                    leadingIcon = {
+                        Icon(Icons.Rounded.AddComment, contentDescription = null, modifier = Modifier.size(15.dp))
+                    },
+                    modifier = Modifier.testTag("drawer_new_session_button")
+                )
+
+                AssistChip(
+                    onClick = onOpenFullChat,
+                    label = { Text("Full Chat", maxLines = 1) },
+                    leadingIcon = {
+                        Icon(Icons.Rounded.OpenInFull, contentDescription = null, modifier = Modifier.size(15.dp))
+                    },
+                    modifier = Modifier.testTag("drawer_open_full_chat_button")
+                )
+
+                if (hasOpenFile && !openFileName.isNullOrBlank()) {
+                    AssistChip(
+                        onClick = onCloseOpenFile,
+                        label = { Text("Close $openFileName", maxLines = 1) },
+                        leadingIcon = {
+                            Icon(Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(15.dp))
+                        },
+                        modifier = Modifier.testTag("workspace_close_file_chip")
+                    )
                 }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -318,132 +448,16 @@ internal fun IdeTopBar(
 }
 
 @Composable
-internal fun IdeActivityRail(
-    activeSection: IdeSidebarSection,
-    sidebarVisible: Boolean,
-    onSelectSection: (IdeSidebarSection) -> Unit,
-    onOpenProviders: () -> Unit,
-    onOpenMcp: () -> Unit,
-    onOpenSettings: () -> Unit
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier
-            .width(46.dp)
-            .fillMaxHeight()
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(vertical = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                RailIconButton(
-                    icon = Icons.Rounded.FolderCopy,
-                    contentDescription = "Project Explorer",
-                    selected = sidebarVisible && activeSection == IdeSidebarSection.EXPLORER,
-                    onClick = { onSelectSection(IdeSidebarSection.EXPLORER) },
-                    testTag = "rail_explorer_button"
-                )
-                RailIconButton(
-                    icon = Icons.Rounded.Search,
-                    contentDescription = "Search Workspace",
-                    selected = sidebarVisible && activeSection == IdeSidebarSection.SEARCH,
-                    onClick = { onSelectSection(IdeSidebarSection.SEARCH) },
-                    testTag = "rail_search_button"
-                )
-                RailIconButton(
-                    icon = Icons.Rounded.CloudSync,
-                    contentDescription = "Source Control & GitHub",
-                    selected = sidebarVisible && activeSection == IdeSidebarSection.SOURCE_CONTROL,
-                    onClick = { onSelectSection(IdeSidebarSection.SOURCE_CONTROL) },
-                    testTag = "rail_source_control_button"
-                )
-                RailIconButton(
-                    icon = Icons.Rounded.Key,
-                    contentDescription = "Providers & Custom APIs",
-                    selected = false,
-                    onClick = onOpenProviders,
-                    testTag = "rail_providers_button"
-                )
-                RailIconButton(
-                    icon = Icons.Rounded.Hub,
-                    contentDescription = "MCP Servers",
-                    selected = false,
-                    onClick = onOpenMcp,
-                    testTag = "rail_mcp_button"
-                )
-            }
-
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                RailIconButton(
-                    icon = Icons.Rounded.Settings,
-                    contentDescription = "Settings",
-                    selected = false,
-                    onClick = onOpenSettings,
-                    testTag = "rail_settings_button"
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RailIconButton(
-    icon: ImageVector,
-    contentDescription: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    testTag: String
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .clickable(onClick = onClick)
-            .background(
-                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                else Color.Transparent
-            )
-            .testTag(testTag),
-        contentAlignment = Alignment.Center
-    ) {
-        if (selected) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .width(2.5.dp)
-                    .height(28.dp)
-                    .background(MaterialTheme.colorScheme.primary)
-            )
-        }
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(21.dp)
-        )
-    }
-}
-
-@Composable
-internal fun IdeSidebarPane(
+internal fun WorkspaceFilesExplorerContent(
     section: IdeSidebarSection,
+    onSelectSection: (IdeSidebarSection) -> Unit,
     activeProject: WorkspaceProject?,
     nodes: List<FileNode>,
     selectedFilePath: String?,
     searchQuery: String,
     searchResult: String,
     state: WorkspaceUiState,
-    onCollapse: () -> Unit,
+    onClosePanel: (() -> Unit)? = null,
     onNewProject: () -> Unit,
     onPickDeviceFolder: () -> Unit,
     onSelectFile: (String) -> Unit,
@@ -451,6 +465,9 @@ internal fun IdeSidebarPane(
     onSearchQueryChanged: (String) -> Unit,
     onRunSearch: () -> Unit,
     onNewFile: () -> Unit,
+    onNewFolder: () -> Unit,
+    onImportZip: () -> Unit,
+    onExportZip: () -> Unit,
     onCommitGitHub: () -> Unit,
     onSyncNow: () -> Unit,
     onPullGitHub: () -> Unit,
@@ -458,192 +475,257 @@ internal fun IdeSidebarPane(
     onOpenGitHubAccount: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = modifier.fillMaxHeight()
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Section Title Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(36.dp)
-                    .padding(horizontal = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = section.label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    letterSpacing = 0.8.sp
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = onNewProject,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .testTag("sidebar_new_project_button")
-                    ) {
-                        Icon(
-                            Icons.Rounded.Add,
-                            contentDescription = "New Project",
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = onCollapse,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .testTag("sidebar_collapse_button")
-                    ) {
-                        Icon(
-                            Icons.Rounded.ChevronLeft,
-                            contentDescription = "Collapse sidebar",
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
+    var moreMenuOpen by remember { mutableStateOf(false) }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        // Section Selector Header (FILES | SEARCH | GITHUB)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            IdeSidebarSection.entries.forEach { target ->
+                val isSelected = section == target
+                Surface(
+                    onClick = { onSelectSection(target) },
+                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RoundedCornerShape(6.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                    ),
+                    modifier = Modifier.testTag("files_tab_${target.name.lowercase()}")
+                ) {
+                    Text(
+                        text = target.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
                 }
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            // Main Section Content
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-            ) {
-                when (section) {
-                    IdeSidebarSection.EXPLORER -> {
-                        if (activeProject == null) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+            Spacer(Modifier.weight(1f))
+
+            Box {
+                IconButton(
+                    onClick = { moreMenuOpen = true },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Rounded.MoreHoriz, contentDescription = "More project options", modifier = Modifier.size(18.dp))
+                }
+                DropdownMenu(
+                    expanded = moreMenuOpen,
+                    onDismissRequest = { moreMenuOpen = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("New Project") },
+                        leadingIcon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+                        onClick = {
+                            moreMenuOpen = false
+                            onNewProject()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Pick Files App Folder") },
+                        leadingIcon = { Icon(Icons.Rounded.PhoneAndroid, contentDescription = null) },
+                        onClick = {
+                            moreMenuOpen = false
+                            onPickDeviceFolder()
+                        }
+                    )
+                    if (activeProject != null) {
+                        DropdownMenuItem(
+                            text = { Text("New File") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Rounded.NoteAdd, contentDescription = null) },
+                            onClick = {
+                                moreMenuOpen = false
+                                onNewFile()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("New Folder") },
+                            leadingIcon = { Icon(Icons.Rounded.CreateNewFolder, contentDescription = null) },
+                            onClick = {
+                                moreMenuOpen = false
+                                onNewFolder()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Export Zip") },
+                            onClick = {
+                                moreMenuOpen = false
+                                onExportZip()
+                            }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Import Zip") },
+                        onClick = {
+                            moreMenuOpen = false
+                            onImportZip()
+                        }
+                    )
+                }
+            }
+
+            if (onClosePanel != null) {
+                IconButton(
+                    onClick = onClosePanel,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("sidebar_collapse_button")
+                ) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Hide Files", modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            when (section) {
+                IdeSidebarSection.EXPLORER -> {
+                    if (activeProject == null) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = "No project selected.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Button(
+                                onClick = onNewProject,
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
-                                    text = "No project selected.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                Text("Create New Project")
+                            }
+                            OutlinedButton(
+                                onClick = onPickDeviceFolder,
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Rounded.PhoneAndroid, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Pick Files App Folder")
+                            }
+                        }
+                    } else {
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surfaceContainer)
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.FolderOpen,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
                                 )
-                                Button(
-                                    onClick = onNewProject,
-                                    shape = RoundedCornerShape(4.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("New Project")
+                                Text(
+                                    text = activeProject.name.uppercase(),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (activeProject.isDeviceFolder) {
+                                    Icon(
+                                        Icons.Rounded.PhoneAndroid,
+                                        contentDescription = "Files App Folder",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(15.dp)
+                                    )
                                 }
-                                OutlinedButton(
-                                    onClick = onPickDeviceFolder,
-                                    shape = RoundedCornerShape(4.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                                TextButton(
+                                    onClick = onNewFile,
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                                 ) {
-                                    Icon(Icons.Rounded.PhoneAndroid, contentDescription = null, modifier = Modifier.size(15.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("Files App")
+                                    Text("+ File", style = MaterialTheme.typography.labelMedium)
                                 }
                             }
-                        } else {
-                            Column(modifier = Modifier.fillMaxSize()) {
-                                // Root Project Accordion Header
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(MaterialTheme.colorScheme.surfaceContainer)
-                                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Rounded.ExpandMore,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(14.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Text(
-                                        text = activeProject.name.uppercase(),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontFamily = JetBrainsMonoFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    if (activeProject.isDeviceFolder) {
-                                        Icon(
-                                            Icons.Rounded.PhoneAndroid,
-                                            contentDescription = "Files App Folder",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                    }
-                                }
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                                if (nodes.isEmpty()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(14.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "Workspace is empty.\nTap New File or ask IB_AI below.",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                } else {
-                                    LazyColumn(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentPadding = PaddingValues(vertical = 4.dp)
-                                    ) {
-                                        items(nodes, key = { it.relativePath }) { node ->
-                                            val isSelected = node.relativePath == selectedFilePath
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .background(
-                                                        if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                                                        else Color.Transparent
-                                                    )
-                                                    .clickable { if (!node.isDirectory) onSelectFile(node.relativePath) }
-                                                    .padding(
-                                                        start = (8 + node.depth * 12).dp,
-                                                        end = 4.dp,
-                                                        top = 5.dp,
-                                                        bottom = 5.dp
-                                                    ),
-                                                verticalAlignment = Alignment.CenterVertically
+                            if (nodes.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(20.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "Workspace is empty.\nTap + File or ask IB_AI to create files.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(vertical = 6.dp)
+                                ) {
+                                    items(nodes, key = { it.relativePath }) { node ->
+                                        val isSelected = node.relativePath == selectedFilePath
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(min = 44.dp)
+                                                .background(
+                                                    if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                                                    else Color.Transparent
+                                                )
+                                                .clickable { if (!node.isDirectory) onSelectFile(node.relativePath) }
+                                                .padding(
+                                                    start = (12 + node.depth * 14).dp,
+                                                    end = 6.dp,
+                                                    top = 6.dp,
+                                                    bottom = 6.dp
+                                                ),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = if (node.isDirectory) Icons.Rounded.Folder else Icons.Rounded.Description,
+                                                contentDescription = null,
+                                                tint = fileNodeTint(node),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                text = node.name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontFamily = JetBrainsMonoFamily,
+                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            IconButton(
+                                                onClick = { onDeleteNode(node) },
+                                                modifier = Modifier.size(34.dp)
                                             ) {
                                                 Icon(
-                                                    imageVector = if (node.isDirectory) Icons.Rounded.Folder else Icons.Rounded.Description,
-                                                    contentDescription = null,
-                                                    tint = fileNodeTint(node),
-                                                    modifier = Modifier.size(16.dp)
+                                                    Icons.Rounded.Delete,
+                                                    contentDescription = "Delete ${node.name}",
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
-                                                Spacer(Modifier.width(6.dp))
-                                                Text(
-                                                    text = node.name,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    fontFamily = JetBrainsMonoFamily,
-                                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                IconButton(
-                                                    onClick = { onDeleteNode(node) },
-                                                    modifier = Modifier.size(24.dp)
-                                                ) {
-                                                    Icon(
-                                                        Icons.Rounded.Delete,
-                                                        contentDescription = "Delete ${node.name}",
-                                                        modifier = Modifier.size(13.dp),
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
                                             }
                                         }
                                     }
@@ -651,237 +733,143 @@ internal fun IdeSidebarPane(
                             }
                         }
                     }
+                }
 
-                    IdeSidebarSection.SEARCH -> {
-                        Column(
+                IdeSidebarSection.SEARCH -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = onSearchQueryChanged,
+                            placeholder = { Text("Search code...", fontSize = 13.sp) },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMonoFamily),
+                            shape = RoundedCornerShape(6.dp),
                             modifier = Modifier
-                                .fillMaxSize()
-                                .padding(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                .fillMaxWidth()
+                                .testTag("sidebar_search_input")
+                        )
+                        Button(
+                            onClick = onRunSearch,
+                            enabled = searchQuery.isNotBlank() && activeProject != null,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("sidebar_search_button")
                         ) {
-                            OutlinedTextField(
-                                value = searchQuery,
-                                onValueChange = onSearchQueryChanged,
-                                placeholder = { Text("Search code...", fontSize = 12.sp) },
-                                singleLine = true,
-                                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMonoFamily),
-                                shape = RoundedCornerShape(4.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("sidebar_search_input")
-                            )
-                            Button(
-                                onClick = onRunSearch,
-                                enabled = searchQuery.isNotBlank() && activeProject != null,
-                                shape = RoundedCornerShape(4.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("sidebar_search_button")
-                            ) {
-                                Text("Search Project")
-                            }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            LazyColumn(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                val lines = searchResult.lines().filter { it.isNotBlank() }
-                                items(lines) { line ->
-                                    val candidatePath = line.substringBefore(':').trim()
-                                    val canOpen = candidatePath.isNotEmpty() &&
-                                        !candidatePath.startsWith("Found ") &&
-                                        !candidatePath.startsWith("No matches")
-                                    Surface(
-                                        onClick = { if (canOpen) onSelectFile(candidatePath) },
-                                        color = MaterialTheme.colorScheme.surfaceContainer,
-                                        shape = RoundedCornerShape(4.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            text = line,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontFamily = JetBrainsMonoFamily,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.padding(6.dp)
-                                        )
-                                    }
+                            Icon(Icons.Rounded.Search, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Search Project")
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val lines = searchResult.lines().filter { it.isNotBlank() }
+                            items(lines) { line ->
+                                val candidatePath = line.substringBefore(':').trim()
+                                val canOpen = candidatePath.isNotEmpty() &&
+                                    !candidatePath.startsWith("Found ") &&
+                                    !candidatePath.startsWith("No matches")
+                                Surface(
+                                    onClick = { if (canOpen) onSelectFile(candidatePath) },
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = line,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontFamily = JetBrainsMonoFamily,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(10.dp)
+                                    )
                                 }
                             }
                         }
                     }
+                }
 
-                    IdeSidebarSection.SOURCE_CONTROL -> {
-                        val ghCfg = state.activeProjectGitHubConfig
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                IdeSidebarSection.SOURCE_CONTROL -> {
+                    val ghCfg = state.activeProjectGitHubConfig
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = if (ghCfg != null && ghCfg.repo.isNotBlank()) {
+                                "${ghCfg.owner}/${ghCfg.repo} (${ghCfg.branch.ifBlank { "main" }})"
+                            } else {
+                                "Not linked to GitHub"
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            fontFamily = JetBrainsMonoFamily,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Button(
+                            onClick = onCommitGitHub,
+                            enabled = activeProject != null,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                text = if (ghCfg != null && ghCfg.repo.isNotBlank()) {
-                                    "${ghCfg.owner}/${ghCfg.repo} (${ghCfg.branch.ifBlank { "main" }})"
-                                } else {
-                                    "Not linked to GitHub"
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                                fontFamily = JetBrainsMonoFamily,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Button(
-                                onClick = onCommitGitHub,
-                                enabled = activeProject != null,
-                                shape = RoundedCornerShape(4.dp),
+                            Icon(Icons.Rounded.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Commit & Push")
+                        }
+                        if (ghCfg != null && ghCfg.repo.isNotBlank()) {
+                            OutlinedButton(
+                                onClick = onSyncNow,
+                                enabled = state.activeProjectSyncStatus !is GitHubSyncStatus.Syncing,
+                                shape = RoundedCornerShape(6.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Icon(Icons.Rounded.CloudUpload, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Commit & Push")
-                            }
-                            if (ghCfg != null && ghCfg.repo.isNotBlank()) {
-                                OutlinedButton(
-                                    onClick = onSyncNow,
-                                    enabled = state.activeProjectSyncStatus !is GitHubSyncStatus.Syncing,
-                                    shape = RoundedCornerShape(4.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(15.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        when (val sync = state.activeProjectSyncStatus) {
-                                            is GitHubSyncStatus.Syncing -> "Syncing..."
-                                            is GitHubSyncStatus.Synced -> "Synced ${sync.commitSha.take(6)}"
-                                            is GitHubSyncStatus.Error -> "Retry Sync"
-                                            GitHubSyncStatus.Idle -> "Sync Now"
-                                        }
-                                    )
-                                }
-                                OutlinedButton(
-                                    onClick = onPullGitHub,
-                                    enabled = !state.isBusy,
-                                    shape = RoundedCornerShape(4.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Icon(Icons.Rounded.CloudDownload, contentDescription = null, modifier = Modifier.size(15.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("Pull ${ghCfg.branch.ifBlank { "main" }}")
-                                }
-                                OutlinedButton(
-                                    onClick = { onToggleDirectGitHub(!ghCfg.directGitHubMode) },
-                                    shape = RoundedCornerShape(4.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        if (ghCfg.directGitHubMode) "Direct Live: ON" else "Enable Direct Live",
-                                        maxLines = 1
-                                    )
-                                }
+                                Text(
+                                    when (val sync = state.activeProjectSyncStatus) {
+                                        is GitHubSyncStatus.Syncing -> "Syncing..."
+                                        is GitHubSyncStatus.Synced -> "Synced ${sync.commitSha.take(6)}"
+                                        is GitHubSyncStatus.Error -> "Retry Sync"
+                                        GitHubSyncStatus.Idle -> "Sync Now"
+                                    }
+                                )
                             }
                             OutlinedButton(
-                                onClick = onOpenGitHubAccount,
-                                shape = RoundedCornerShape(4.dp),
+                                onClick = onPullGitHub,
+                                enabled = !state.isBusy,
+                                shape = RoundedCornerShape(6.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("GitHub Account & CI")
+                                Icon(Icons.Rounded.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Pull ${ghCfg.branch.ifBlank { "main" }}")
+                            }
+                            OutlinedButton(
+                                onClick = { onToggleDirectGitHub(!ghCfg.directGitHubMode) },
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    if (ghCfg.directGitHubMode) "Direct Live: ON" else "Enable Direct Live",
+                                    maxLines = 1
+                                )
                             }
                         }
-                    }
-                }
-            }
-
-            // Sticky Sidebar Footer matching reference image ("PROJECTS" -> "New File" | "✓ Commit")
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainer)
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        Icons.Rounded.ChevronRight,
-                        contentDescription = null,
-                        modifier = Modifier.size(13.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "PROJECTS",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        letterSpacing = 0.6.sp
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Surface(
-                        onClick = onNewFile,
-                        enabled = activeProject != null,
-                        shape = RoundedCornerShape(4.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 38.dp)
-                            .testTag("workspace_new_file_button")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                        OutlinedButton(
+                            onClick = onOpenGitHubAccount,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(
-                                Icons.AutoMirrored.Rounded.NoteAdd,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.secondary
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                "New File",
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    Surface(
-                        onClick = onCommitGitHub,
-                        enabled = activeProject != null,
-                        shape = RoundedCornerShape(4.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 38.dp)
-                            .testTag("workspace_push_github_button")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                Icons.Rounded.Check,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                "Commit",
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Text("GitHub Account & CI")
                         }
                     }
                 }
@@ -906,34 +894,25 @@ private fun fileNodeTint(node: FileNode): Color {
 }
 
 @Composable
-internal fun LineNumberedCodeEditorPane(
+internal fun WorkspaceFileViewerPane(
     openTabs: List<String>,
-    selectedFilePath: String?,
+    selectedFilePath: String,
     content: String,
-    isEditing: Boolean,
-    hasActiveProject: Boolean,
-    sidebarVisible: Boolean,
-    onShowSidebar: () -> Unit,
     onSelectTab: (String) -> Unit,
     onCloseTab: (String) -> Unit,
-    onToggleEdit: (Boolean) -> Unit,
-    onSave: (String, String) -> Unit,
-    onNewFile: () -> Unit,
-    onNewFolder: () -> Unit,
-    onImportZip: () -> Unit,
-    onExportZip: () -> Unit,
-    onOpenFullChat: () -> Unit,
+    onCloseViewer: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var draft by remember(selectedFilePath, content) { mutableStateOf(content) }
-    var moreMenuOpen by remember { mutableStateOf(false) }
+    @Suppress("DEPRECATION")
+    val clipboard = LocalClipboardManager.current
+    var copied by remember(selectedFilePath) { mutableStateOf(false) }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceContainerLowest)
     ) {
-        // Tab Bar Header
+        // Read-Only File Viewer Tab Strip
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
             modifier = Modifier.fillMaxWidth()
@@ -941,25 +920,9 @@ internal fun LineNumberedCodeEditorPane(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp),
+                    .height(42.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (!sidebarVisible) {
-                    IconButton(
-                        onClick = onShowSidebar,
-                        modifier = Modifier
-                            .size(38.dp)
-                            .testTag("editor_open_sidebar_button")
-                    ) {
-                        Icon(
-                            Icons.Rounded.FolderOpen,
-                            contentDescription = "Show project sidebar",
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
-                    VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                }
-
                 Row(
                     modifier = Modifier
                         .weight(1f)
@@ -967,9 +930,17 @@ internal fun LineNumberedCodeEditorPane(
                         .horizontalScroll(rememberScrollState()),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (openTabs.isEmpty()) {
+                    val tabsToRender = if (openTabs.isEmpty()) listOf(selectedFilePath) else openTabs
+                    tabsToRender.forEach { tabPath ->
+                        val isActive = tabPath == selectedFilePath
+                        val fileName = tabPath.substringAfterLast('/')
                         Surface(
-                            color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                            onClick = { onSelectTab(tabPath) },
+                            color = if (isActive) {
+                                MaterialTheme.colorScheme.surfaceContainerLowest
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainer
+                            },
                             modifier = Modifier.fillMaxHeight()
                         ) {
                             Column(modifier = Modifier.fillMaxHeight()) {
@@ -977,279 +948,119 @@ internal fun LineNumberedCodeEditorPane(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(2.dp)
-                                        .background(MaterialTheme.colorScheme.primary)
+                                        .background(
+                                            if (isActive) MaterialTheme.colorScheme.primary
+                                            else Color.Transparent
+                                        )
                                 )
-                                Box(
+                                Row(
                                     modifier = Modifier
                                         .fillMaxHeight()
-                                        .padding(horizontal = 12.dp),
-                                    contentAlignment = Alignment.Center
+                                        .padding(start = 10.dp, end = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Text(
-                                        text = "CODE EDITOR",
+                                        text = fileName,
                                         style = MaterialTheme.typography.labelMedium,
-                                        fontFamily = JetBrainsMonoFamily
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        openTabs.forEach { tabPath ->
-                            val isActive = tabPath == selectedFilePath
-                            val fileName = tabPath.substringAfterLast('/')
-                            Surface(
-                                onClick = { onSelectTab(tabPath) },
-                                color = if (isActive) {
-                                    MaterialTheme.colorScheme.surfaceContainerLowest
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceContainer
-                                },
-                                modifier = Modifier.fillMaxHeight()
-                            ) {
-                                Column(modifier = Modifier.fillMaxHeight()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(2.dp)
-                                            .background(
-                                                if (isActive) MaterialTheme.colorScheme.primary
-                                                else Color.Transparent
-                                            )
-                                    )
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxHeight()
-                                            .padding(start = 10.dp, end = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Text(
-                                            text = fileName,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontFamily = JetBrainsMonoFamily,
-                                            color = if (isActive) {
-                                                MaterialTheme.colorScheme.onSurface
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            }
-                                        )
-                                        IconButton(
-                                            onClick = { onCloseTab(tabPath) },
-                                            modifier = Modifier.size(22.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Rounded.Close,
-                                                contentDescription = "Close $fileName",
-                                                modifier = Modifier.size(13.dp),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                        fontFamily = JetBrainsMonoFamily,
+                                        color = if (isActive) {
+                                            MaterialTheme.colorScheme.onSurface
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
                                         }
+                                    )
+                                    IconButton(
+                                        onClick = { onCloseTab(tabPath) },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Close,
+                                            contentDescription = "Close $fileName",
+                                            modifier = Modifier.size(14.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                 }
                             }
-                            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         }
+                        VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
                 }
 
-                // Edit / Save / More controls
-                if (selectedFilePath != null) {
-                    if (isEditing) {
-                        TextButton(
-                            onClick = {
-                                draft = content
-                                onToggleEdit(false)
-                            },
-                            contentPadding = PaddingValues(horizontal = 8.dp)
-                        ) {
-                            Text("Cancel", style = MaterialTheme.typography.labelMedium)
-                        }
-                        IconButton(
-                            onClick = { onSave(selectedFilePath, draft) },
-                            modifier = Modifier
-                                .size(38.dp)
-                                .testTag("code_viewer_save_button")
-                        ) {
-                            Icon(
-                                Icons.Rounded.Save,
-                                contentDescription = "Save file",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    } else {
-                        IconButton(
-                            onClick = { onToggleEdit(true) },
-                            modifier = Modifier
-                                .size(38.dp)
-                                .testTag("code_viewer_edit_button")
-                        ) {
-                            Icon(
-                                Icons.Rounded.Edit,
-                                contentDescription = "Edit file",
-                                modifier = Modifier.size(17.dp)
-                            )
-                        }
-                    }
+                IconButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(content))
+                        copied = true
+                    },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .testTag("file_viewer_copy_button")
+                ) {
+                    Icon(
+                        imageVector = if (copied) Icons.Rounded.Check else Icons.Rounded.ContentCopy,
+                        contentDescription = "Copy file contents",
+                        tint = if (copied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(17.dp)
+                    )
                 }
 
-                Box {
-                    IconButton(
-                        onClick = { moreMenuOpen = true },
-                        modifier = Modifier
-                            .size(38.dp)
-                            .testTag("code_editor_more_button")
-                    ) {
-                        Icon(
-                            Icons.Rounded.MoreHoriz,
-                            contentDescription = "Editor actions",
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = moreMenuOpen,
-                        onDismissRequest = { moreMenuOpen = false }
-                    ) {
-                        if (hasActiveProject) {
-                            DropdownMenuItem(
-                                text = { Text("New File") },
-                                leadingIcon = { Icon(Icons.AutoMirrored.Rounded.NoteAdd, contentDescription = null) },
-                                onClick = {
-                                    moreMenuOpen = false
-                                    onNewFile()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("New Folder") },
-                                leadingIcon = { Icon(Icons.Rounded.CreateNewFolder, contentDescription = null) },
-                                onClick = {
-                                    moreMenuOpen = false
-                                    onNewFolder()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Export Zip") },
-                                onClick = {
-                                    moreMenuOpen = false
-                                    onExportZip()
-                                }
-                            )
-                        }
-                        DropdownMenuItem(
-                            text = { Text("Import Zip") },
-                            onClick = {
-                                moreMenuOpen = false
-                                onImportZip()
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Open Full Chat") },
-                            leadingIcon = { Icon(Icons.Rounded.SmartToy, contentDescription = null) },
-                            onClick = {
-                                moreMenuOpen = false
-                                onOpenFullChat()
-                            }
-                        )
-                    }
+                TextButton(
+                    onClick = onCloseViewer,
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    modifier = Modifier.testTag("file_viewer_close_button")
+                ) {
+                    Text("Hide", style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-        // Code Content Area
-        if (selectedFilePath == null) {
+        // Read-Only Line-Numbered Syntax-Highlighted File View (No Code Editor)
+        val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+        val ext = selectedFilePath.substringAfterLast('.', "")
+        val highlighted = remember(content, ext, isDark) {
+            SyntaxHighlighter.highlight(content, ext, isDark)
+        }
+        val lineCount = remember(content) {
+            maxOf(1, content.count { it == '\n' } + 1)
+        }
+        val lineNumbersText = remember(lineCount) {
+            (1..lineCount).joinToString("\n")
+        }
+
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+        ) {
+            Text(
+                text = lineNumbersText,
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 13.sp,
+                lineHeight = 20.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                modifier = Modifier
+                    .width(42.dp)
+                    .padding(vertical = 10.dp, horizontal = 8.dp)
+            )
+            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp),
-                contentAlignment = Alignment.Center
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(vertical = 10.dp, horizontal = 12.dp)
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        Icons.Rounded.Code,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(36.dp)
-                    )
+                SelectionContainer {
                     Text(
-                        text = if (hasActiveProject) {
-                            "Select a file from PROJECTS or ask IB_AI below to generate code."
-                        } else {
-                            "Open a folder, GitHub repo, or local project — or chat directly with IB_AI below."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = if (content.isEmpty()) AnnotatedString("// Empty file") else highlighted,
+                        fontFamily = JetBrainsMonoFamily,
+                        fontSize = 13.sp,
+                        lineHeight = 20.sp,
+                        softWrap = false,
+                        color = if (content.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified
                     )
-                    if (!sidebarVisible) {
-                        OutlinedButton(onClick = onShowSidebar, shape = RoundedCornerShape(4.dp)) {
-                            Text("Open Projects Sidebar")
-                        }
-                    }
-                }
-            }
-        } else if (isEditing) {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(8.dp)
-                    .testTag("code_editor_input"),
-                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = JetBrainsMonoFamily,
-                    fontSize = 13.sp,
-                    lineHeight = 20.sp
-                ),
-                shape = RoundedCornerShape(4.dp)
-            )
-        } else {
-            val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-            val ext = selectedFilePath.substringAfterLast('.', "")
-            val highlighted = remember(content, ext, isDark) {
-                SyntaxHighlighter.highlight(content, ext, isDark)
-            }
-            val lineCount = remember(content) {
-                maxOf(1, content.count { it == '\n' } + 1)
-            }
-            val lineNumbersText = remember(lineCount) {
-                (1..lineCount).joinToString("\n")
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-            ) {
-                // Line Number Gutter
-                Text(
-                    text = lineNumbersText,
-                    fontFamily = JetBrainsMonoFamily,
-                    fontSize = 13.sp,
-                    lineHeight = 20.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                    modifier = Modifier
-                        .width(42.dp)
-                        .padding(vertical = 10.dp, horizontal = 8.dp)
-                )
-                VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(rememberScrollState())
-                        .padding(vertical = 10.dp, horizontal = 12.dp)
-                ) {
-                    SelectionContainer {
-                        Text(
-                            text = highlighted,
-                            fontFamily = JetBrainsMonoFamily,
-                            fontSize = 13.sp,
-                            lineHeight = 20.sp,
-                            softWrap = false
-                        )
-                    }
                 }
             }
         }
@@ -1257,10 +1068,12 @@ internal fun LineNumberedCodeEditorPane(
 }
 
 @Composable
-internal fun DockedIbAiChatDrawer(
+internal fun IbAiWorkspaceConsole(
     chatState: ChatUiState,
+    fullHeightMode: Boolean,
     expanded: Boolean,
     promptDraft: String,
+    hasActiveProject: Boolean,
     onPromptDraftChanged: (String) -> Unit,
     onToggleExpanded: () -> Unit,
     onNewSessionClick: () -> Unit,
@@ -1268,6 +1081,7 @@ internal fun DockedIbAiChatDrawer(
     onSendPrompt: () -> Unit,
     onStopGeneration: () -> Unit,
     onFixWorkflowAlert: () -> Unit,
+    onPickFilesClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val displayedMessages = remember(chatState.messages, chatState.streamingMessage) {
@@ -1275,9 +1089,10 @@ internal fun DockedIbAiChatDrawer(
         if (chatState.streamingMessage != null) base + chatState.streamingMessage else base
     }
     val listState = rememberLazyListState()
+    val showBody = fullHeightMode || expanded
 
-    LaunchedEffect(displayedMessages.size, chatState.streamingMessage?.content?.length, expanded) {
-        if (expanded && displayedMessages.isNotEmpty()) {
+    LaunchedEffect(displayedMessages.size, chatState.streamingMessage?.content?.length, showBody) {
+        if (showBody && displayedMessages.isNotEmpty()) {
             listState.animateScrollToItem(displayedMessages.lastIndex)
         }
     }
@@ -1288,26 +1103,34 @@ internal fun DockedIbAiChatDrawer(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-            // Drawer Title Header ("IB_AI CHAT")
+            // Header ("IB_AI CONSOLE")
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(34.dp)
+                    .height(38.dp)
                     .background(MaterialTheme.colorScheme.surfaceContainer)
-                    .clickable(onClick = onToggleExpanded)
-                    .padding(horizontal = 10.dp),
+                    .clickable(enabled = !fullHeightMode, onClick = onToggleExpanded)
+                    .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
+                    Icon(
+                        Icons.Rounded.SmartToy,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
                     Text(
-                        text = "IB_AI CHAT",
+                        text = "IB_AI WORKSPACE",
                         style = MaterialTheme.typography.labelMedium,
                         fontFamily = JetBrainsMonoFamily,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
                     )
                     val mode = chatState.currentSessionPrompt?.mode ?: chatState.currentSession?.mode
                     Text(
@@ -1317,7 +1140,9 @@ internal fun DockedIbAiChatDrawer(
                             null -> "Web Live"
                         },
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     if (chatState.isGenerating) {
                         CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
@@ -1327,44 +1152,34 @@ internal fun DockedIbAiChatDrawer(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
                         onClick = onNewSessionClick,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .testTag("drawer_new_session_button")
+                        modifier = Modifier.size(32.dp)
                     ) {
-                        Icon(
-                            Icons.Rounded.AddComment,
-                            contentDescription = "New session",
-                            modifier = Modifier.size(15.dp)
-                        )
+                        Icon(Icons.Rounded.AddComment, contentDescription = "New session", modifier = Modifier.size(16.dp))
                     }
                     IconButton(
                         onClick = onExpandFullChat,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .testTag("drawer_open_full_chat_button")
+                        modifier = Modifier.size(32.dp)
                     ) {
-                        Icon(
-                            Icons.Rounded.OpenInFull,
-                            contentDescription = "Open full Chat",
-                            modifier = Modifier.size(14.dp)
-                        )
+                        Icon(Icons.Rounded.OpenInFull, contentDescription = "Open full Chat", modifier = Modifier.size(15.dp))
                     }
-                    IconButton(
-                        onClick = onToggleExpanded,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .testTag("drawer_toggle_button")
-                    ) {
-                        Icon(
-                            if (expanded) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess,
-                            contentDescription = if (expanded) "Minimize chat drawer" else "Expand chat drawer",
-                            modifier = Modifier.size(16.dp)
-                        )
+                    if (!fullHeightMode) {
+                        IconButton(
+                            onClick = onToggleExpanded,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("drawer_toggle_button")
+                        ) {
+                            Icon(
+                                if (expanded) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess,
+                                contentDescription = if (expanded) "Collapse chat" else "Expand chat",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
 
-            if (expanded) {
+            if (showBody) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                 chatState.pendingWorkflowAlert?.let { alert ->
@@ -1372,7 +1187,7 @@ internal fun DockedIbAiChatDrawer(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(MaterialTheme.colorScheme.errorContainer)
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -1388,7 +1203,7 @@ internal fun DockedIbAiChatDrawer(
                             onClick = onFixWorkflowAlert,
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                         ) {
-                            Icon(Icons.Rounded.AutoFixHigh, contentDescription = null, modifier = Modifier.size(13.dp))
+                            Icon(Icons.Rounded.AutoFixHigh, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("Fix with AI", style = MaterialTheme.typography.labelSmall)
                         }
@@ -1402,30 +1217,70 @@ internal fun DockedIbAiChatDrawer(
                         color = MaterialTheme.colorScheme.error,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
                     )
                 }
 
-                // Compact Stream Feed matching [USER]: / [IB_AI]: look
-                Box(
-                    modifier = Modifier
+                val feedModifier = if (fullHeightMode) {
+                    Modifier
+                        .weight(1f)
                         .fillMaxWidth()
-                        .heightIn(min = 82.dp, max = 135.dp)
                         .background(MaterialTheme.colorScheme.background)
-                ) {
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 100.dp, max = 180.dp)
+                        .background(MaterialTheme.colorScheme.background)
+                }
+
+                Box(modifier = feedModifier) {
                     if (displayedMessages.isEmpty()) {
-                        Text(
-                            text = "[IB_AI]: Ready — ask questions, search the live internet, or build code in your workspace.",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = JetBrainsMonoFamily,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(10.dp)
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = if (hasActiveProject) {
+                                    "[IB_AI]: Ready — build code, search the live internet, or tap Files above to inspect project files."
+                                } else {
+                                    "[IB_AI]: Ready — ask questions, search the live internet, or tap Files to open or create a project."
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontFamily = JetBrainsMonoFamily,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (fullHeightMode) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(onClick = onPickFilesClick, shape = RoundedCornerShape(6.dp)) {
+                                        Icon(Icons.Rounded.FolderCopy, contentDescription = null, modifier = Modifier.size(15.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Show Files")
+                                    }
+                                    AssistChip(
+                                        onClick = { onPromptDraftChanged("Inspect the workspace and summarize the architecture") },
+                                        label = { Text("Inspect workspace") }
+                                    )
+                                    AssistChip(
+                                        onClick = { onPromptDraftChanged("Search the web for the latest docs on ") },
+                                        label = { Text("Web search") }
+                                    )
+                                }
+                            }
+                        }
                     } else {
                         LazyColumn(
                             state = listState,
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(displayedMessages, key = { it.id }) { msg ->
                                 val isUser = msg.role == ChatRole.USER
@@ -1435,36 +1290,45 @@ internal fun DockedIbAiChatDrawer(
                                 } else {
                                     MaterialTheme.colorScheme.tertiary
                                 }
-                                Column {
-                                    Row(modifier = Modifier.fillMaxWidth()) {
+                                Surface(
+                                    color = if (isUser) {
+                                        MaterialTheme.colorScheme.surfaceContainerLow
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceContainerLowest
+                                    },
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
                                         Text(
                                             text = prefix,
-                                            style = MaterialTheme.typography.bodySmall,
+                                            style = MaterialTheme.typography.labelMedium,
                                             fontFamily = JetBrainsMonoFamily,
                                             fontWeight = FontWeight.SemiBold,
                                             color = prefixColor
                                         )
+                                        Spacer(Modifier.height(2.dp))
                                         Text(
                                             text = msg.content.ifBlank {
                                                 if (msg.isStreaming) "Working..." else ""
                                             },
                                             style = MaterialTheme.typography.bodySmall,
                                             fontFamily = JetBrainsMonoFamily,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            maxLines = 4,
-                                            overflow = TextOverflow.Ellipsis
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
-                                    }
-                                    if (msg.toolCalls.isNotEmpty()) {
-                                        val toolSummary = msg.toolCalls.joinToString(", ") { it.name }
-                                        Text(
-                                            text = "  tools: $toolSummary",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontFamily = JetBrainsMonoFamily,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                        if (msg.toolCalls.isNotEmpty()) {
+                                            val toolSummary = msg.toolCalls.joinToString(", ") { it.name }
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                text = "tools: $toolSummary",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontFamily = JetBrainsMonoFamily,
+                                                color = MaterialTheme.colorScheme.secondary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1472,26 +1336,26 @@ internal fun DockedIbAiChatDrawer(
                     }
                 }
 
-                // Cyan-bordered "Ask IB_AI..." Composer Row
+                // Composer Row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Surface(
-                        shape = RoundedCornerShape(4.dp),
+                        shape = RoundedCornerShape(6.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerLowest,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
                         modifier = Modifier
                             .weight(1f)
-                            .heightIn(min = 42.dp)
+                            .heightIn(min = 46.dp, max = 120.dp)
                     ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 10.dp),
+                                .padding(horizontal = 12.dp, vertical = 12.dp),
                             contentAlignment = Alignment.CenterStart
                         ) {
                             if (promptDraft.isEmpty()) {
@@ -1505,7 +1369,7 @@ internal fun DockedIbAiChatDrawer(
                             BasicTextField(
                                 value = promptDraft,
                                 onValueChange = onPromptDraftChanged,
-                                singleLine = true,
+                                maxLines = 4,
                                 textStyle = MaterialTheme.typography.bodySmall.copy(
                                     fontFamily = JetBrainsMonoFamily,
                                     color = MaterialTheme.colorScheme.onSurface
@@ -1522,7 +1386,7 @@ internal fun DockedIbAiChatDrawer(
                         IconButton(
                             onClick = onStopGeneration,
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(48.dp)
                                 .testTag("drawer_stop_button")
                         ) {
                             Icon(
@@ -1536,7 +1400,7 @@ internal fun DockedIbAiChatDrawer(
                             onClick = onSendPrompt,
                             enabled = promptDraft.isNotBlank(),
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(48.dp)
                                 .testTag("drawer_send_button")
                         ) {
                             Icon(
@@ -1551,63 +1415,6 @@ internal fun DockedIbAiChatDrawer(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun IdeRightUtilityStrip(
-    chatExpanded: Boolean,
-    onToggleChat: () -> Unit,
-    onNewSession: () -> Unit,
-    onSwitchModel: () -> Unit,
-    onNewFile: () -> Unit
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier
-            .width(38.dp)
-            .fillMaxHeight()
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(vertical = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            IconButton(onClick = onToggleChat, modifier = Modifier.size(34.dp)) {
-                Icon(
-                    Icons.Rounded.SmartToy,
-                    contentDescription = "Toggle IB_AI Chat",
-                    tint = if (chatExpanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            IconButton(onClick = onNewSession, modifier = Modifier.size(34.dp)) {
-                Icon(
-                    Icons.Rounded.AddComment,
-                    contentDescription = "New session",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            IconButton(onClick = onSwitchModel, modifier = Modifier.size(34.dp)) {
-                Icon(
-                    Icons.Rounded.Public,
-                    contentDescription = "Switch model",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            IconButton(onClick = onNewFile, modifier = Modifier.size(34.dp)) {
-                Icon(
-                    Icons.AutoMirrored.Rounded.NoteAdd,
-                    contentDescription = "New file",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp)
-                )
             }
         }
     }

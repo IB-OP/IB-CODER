@@ -79,22 +79,18 @@ class CloudAccountVaultRepository(
     private var mutationObserverJob: Job? = null
     private var activeUid: String? = null
 
-    fun authStateFlow(): Flow<FirebaseUser?> = callbackFlow {
-        val firebaseAuth = auth
-        if (firebaseAuth == null) {
-            trySend(null)
-            awaitClose {}
-            return@callbackFlow
-        }
-        val listener = FirebaseAuth.AuthStateListener { fa ->
-            trySend(fa.currentUser)
-        }
-        firebaseAuth.addAuthStateListener(listener)
-        trySend(firebaseAuth.currentUser)
-        awaitClose {
-            firebaseAuth.removeAuthStateListener(listener)
-        }
+    private val _authState = MutableStateFlow(auth?.currentUser)
+    val authState: StateFlow<FirebaseUser?> = _authState.asStateFlow()
+
+    private val authStateListener = FirebaseAuth.AuthStateListener { fa ->
+        _authState.value = fa.currentUser
     }
+
+    init {
+        auth?.addAuthStateListener(authStateListener)
+    }
+
+    fun authStateFlow(): Flow<FirebaseUser?> = authState
 
     suspend fun signInWithGoogleIdToken(idToken: String): Result<FirebaseUser> {
         val firebaseAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth is not initialized."))
@@ -102,6 +98,7 @@ class CloudAccountVaultRepository(
             val credential = GoogleAuthProvider.getCredential(idToken, null)
             val result = firebaseAuth.signInWithCredential(credential).await()
             val user = result.user ?: return Result.failure(IllegalStateException("Google sign-in returned no user."))
+            _authState.value = user
             updateLocalSessionFromFirebaseUser(user)
             Result.success(user)
         } catch (e: CancellationException) {
@@ -166,6 +163,7 @@ class CloudAccountVaultRepository(
                 credentialManager.clearCredentialState(ClearCredentialStateRequest())
             }
             auth?.signOut()
+            _authState.value = null
             if (clearLocalVaultSecrets) {
                 settingsDataStore.clearAccountVaultSecretsForSignOut()
             } else {

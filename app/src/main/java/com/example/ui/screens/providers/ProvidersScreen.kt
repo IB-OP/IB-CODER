@@ -105,11 +105,18 @@ fun ProvidersScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("AI Providers", style = MaterialTheme.typography.titleLarge)
                         Text(
-                            "${state.totalProviderCount} providers • Synced to your account",
+                            text = "AI Providers",
+                            style = MaterialTheme.typography.titleLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${state.totalProviderCount} providers • Synced",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 },

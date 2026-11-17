@@ -69,6 +69,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.BuildConfig
@@ -248,24 +249,31 @@ fun SettingsScreen(
                             }
                         }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             Button(
                                 onClick = { viewModel.syncAccountVaultNow() },
                                 enabled = state.cloudSyncStatus !is CloudVaultSyncStatus.Syncing,
-                                modifier = Modifier.testTag("settings_cloud_sync_now_button")
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_cloud_sync_now_button")
                             ) {
                                 Icon(Icons.Rounded.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Sync Now")
+                                Text("Sync Now", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             OutlinedButton(
                                 onClick = { viewModel.signOutAccount(context) },
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                                modifier = Modifier.testTag("settings_sign_out_button")
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_sign_out_button")
                             ) {
                                 Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Sign Out")
+                                Text("Sign Out", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }

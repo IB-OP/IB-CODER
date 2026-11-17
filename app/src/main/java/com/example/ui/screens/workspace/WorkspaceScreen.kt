@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,14 +24,17 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +54,7 @@ import com.example.ui.screens.chat.ChatViewModel
 import com.example.ui.screens.chat.ProviderOptionUi
 import com.example.ui.theme.JetBrainsMonoFamily
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkspaceScreen(
     viewModel: WorkspaceViewModel,
@@ -65,10 +70,11 @@ fun WorkspaceScreen(
     val chatState by chatViewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    var activeSidebarSection by rememberSaveable { mutableStateOf(IdeSidebarSection.EXPLORER) }
-    var sidebarVisible by rememberSaveable { mutableStateOf(true) }
-    var chatDrawerExpanded by rememberSaveable { mutableStateOf(true) }
-    var drawerPromptDraft by rememberSaveable { mutableStateOf("") }
+    var activeFilesSection by rememberSaveable { mutableStateOf(IdeSidebarSection.EXPLORER) }
+    // Files panel/sheet is hidden by default so files are only shown when user taps the Files button.
+    var filesPanelVisible by rememberSaveable { mutableStateOf(false) }
+    var chatExpandedWhenViewingFile by rememberSaveable { mutableStateOf(true) }
+    var promptDraft by rememberSaveable { mutableStateOf("") }
 
     var showCreateProject by remember { mutableStateOf(false) }
     var showRenameProject by remember { mutableStateOf(false) }
@@ -98,9 +104,14 @@ fun WorkspaceScreen(
         if (uri != null) viewModel.exportZip(context, uri)
     }
 
+    val fileCount = remember(state.fileTree) {
+        state.fileTree.count { !it.isDirectory }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .navigationBarsPadding()
             .imePadding()
     ) {
         IdeTopBar(
@@ -115,6 +126,23 @@ fun WorkspaceScreen(
             onRefreshTree = viewModel::refreshTree,
             onSwitchModel = { showSwitchModelDialog = true },
             onOpenSidebar = onOpenSidebar
+        )
+
+        WorkspaceQuickActionBar(
+            hasActiveProject = state.activeProject != null,
+            fileCount = fileCount,
+            filesOpen = filesPanelVisible,
+            hasOpenFile = state.selectedFilePath != null,
+            openFileName = state.selectedFilePath?.substringAfterLast('/'),
+            onToggleFiles = { filesPanelVisible = !filesPanelVisible },
+            onNewFile = { showNewFileDialog = true },
+            onCommitGitHub = {
+                viewModel.resetGitHubDialogFeedback()
+                showGitHubPushDialog = true
+            },
+            onNewSession = { showNewSessionDialog = true },
+            onOpenFullChat = onAskAgent,
+            onCloseOpenFile = viewModel::closeAllTabs
         )
 
         state.statusMessage?.let { msg ->
@@ -171,121 +199,261 @@ fun WorkspaceScreen(
                 .fillMaxWidth()
         ) {
             val isWideScreen = maxWidth >= 600.dp
-            val sidebarWidth = if (isWideScreen) 232.dp else 184.dp
 
-            Row(modifier = Modifier.fillMaxSize()) {
-                // 1. Left IDE Activity Rail
-                IdeActivityRail(
-                    activeSection = activeSidebarSection,
-                    sidebarVisible = sidebarVisible,
-                    onSelectSection = { target ->
-                        if (sidebarVisible && activeSidebarSection == target) {
-                            sidebarVisible = false
-                        } else {
-                            activeSidebarSection = target
-                            sidebarVisible = true
+            if (isWideScreen) {
+                // Landscape / Tablet: Optional side Files panel (when toggled) + File Viewer (if open) / Full IB_AI Console
+                Row(modifier = Modifier.fillMaxSize()) {
+                    if (filesPanelVisible) {
+                        WorkspaceFilesExplorerContent(
+                            section = activeFilesSection,
+                            onSelectSection = { activeFilesSection = it },
+                            activeProject = state.activeProject,
+                            nodes = state.fileTree,
+                            selectedFilePath = state.selectedFilePath,
+                            searchQuery = state.sidebarSearchQuery,
+                            searchResult = state.sidebarSearchResult,
+                            state = state,
+                            onClosePanel = { filesPanelVisible = false },
+                            onNewProject = { showCreateProject = true },
+                            onPickDeviceFolder = { openFolderLauncher.launch(null) },
+                            onSelectFile = { path -> viewModel.openFile(path) },
+                            onDeleteNode = { node -> pendingDeleteNode = node },
+                            onSearchQueryChanged = viewModel::setSidebarSearchQuery,
+                            onRunSearch = { viewModel.runSidebarSearch() },
+                            onNewFile = { showNewFileDialog = true },
+                            onNewFolder = { showNewFolderDialog = true },
+                            onImportZip = {
+                                importZipLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed"))
+                            },
+                            onExportZip = {
+                                val safeName = (state.activeProject?.name ?: "project")
+                                    .replace(Regex("[^A-Za-z0-9._-]"), "_")
+                                exportZipLauncher.launch("$safeName.zip")
+                            },
+                            onCommitGitHub = {
+                                viewModel.resetGitHubDialogFeedback()
+                                showGitHubPushDialog = true
+                            },
+                            onSyncNow = viewModel::syncNow,
+                            onPullGitHub = viewModel::pullFromGitHub,
+                            onToggleDirectGitHub = viewModel::toggleDirectGitHubMode,
+                            onOpenGitHubAccount = onOpenGitHubAccount,
+                            modifier = Modifier
+                                .width(272.dp)
+                                .fillMaxHeight()
+                        )
+                        VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+
+                    val selectedPath = state.selectedFilePath
+                    if (selectedPath != null) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        ) {
+                            WorkspaceFileViewerPane(
+                                openTabs = state.openTabs,
+                                selectedFilePath = selectedPath,
+                                content = state.selectedFileContent,
+                                onSelectTab = viewModel::openFile,
+                                onCloseTab = viewModel::closeTab,
+                                onCloseViewer = viewModel::closeAllTabs,
+                                modifier = Modifier
+                                    .weight(1.15f)
+                                    .fillMaxHeight()
+                            )
+                            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            IbAiWorkspaceConsole(
+                                chatState = chatState,
+                                fullHeightMode = true,
+                                expanded = true,
+                                promptDraft = promptDraft,
+                                hasActiveProject = state.activeProject != null,
+                                onPromptDraftChanged = { promptDraft = it },
+                                onToggleExpanded = {},
+                                onNewSessionClick = { showNewSessionDialog = true },
+                                onExpandFullChat = onAskAgent,
+                                onSendPrompt = {
+                                    val msg = promptDraft
+                                    promptDraft = ""
+                                    chatViewModel.sendMessage(msg)
+                                },
+                                onStopGeneration = chatViewModel::stopGeneration,
+                                onFixWorkflowAlert = {
+                                    chatViewModel.fixPendingWorkflowAlert()
+                                    onAskAgent()
+                                },
+                                onPickFilesClick = { filesPanelVisible = true },
+                                modifier = Modifier
+                                    .weight(0.85f)
+                                    .fillMaxHeight()
+                            )
                         }
-                    },
-                    onOpenProviders = onOpenProviders,
-                    onOpenMcp = onOpenMcpServers,
-                    onOpenSettings = onOpenSettings
-                )
-                VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // 2. Collapsible Side Pane (PROJECTS / SEARCH / SOURCE CONTROL)
-                if (sidebarVisible) {
-                    IdeSidebarPane(
-                        section = activeSidebarSection,
-                        activeProject = state.activeProject,
-                        nodes = state.fileTree,
-                        selectedFilePath = state.selectedFilePath,
-                        searchQuery = state.sidebarSearchQuery,
-                        searchResult = state.sidebarSearchResult,
-                        state = state,
-                        onCollapse = { sidebarVisible = false },
-                        onNewProject = { showCreateProject = true },
-                        onPickDeviceFolder = { openFolderLauncher.launch(null) },
-                        onSelectFile = { path -> viewModel.openFile(path) },
-                        onDeleteNode = { node -> pendingDeleteNode = node },
-                        onSearchQueryChanged = viewModel::setSidebarSearchQuery,
-                        onRunSearch = { viewModel.runSidebarSearch() },
-                        onNewFile = { showNewFileDialog = true },
-                        onCommitGitHub = {
-                            viewModel.resetGitHubDialogFeedback()
-                            showGitHubPushDialog = true
-                        },
-                        onSyncNow = viewModel::syncNow,
-                        onPullGitHub = viewModel::pullFromGitHub,
-                        onToggleDirectGitHub = viewModel::toggleDirectGitHubMode,
-                        onOpenGitHubAccount = onOpenGitHubAccount,
-                        modifier = Modifier.width(sidebarWidth)
-                    )
-                    VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    } else {
+                        IbAiWorkspaceConsole(
+                            chatState = chatState,
+                            fullHeightMode = true,
+                            expanded = true,
+                            promptDraft = promptDraft,
+                            hasActiveProject = state.activeProject != null,
+                            onPromptDraftChanged = { promptDraft = it },
+                            onToggleExpanded = {},
+                            onNewSessionClick = { showNewSessionDialog = true },
+                            onExpandFullChat = onAskAgent,
+                            onSendPrompt = {
+                                val msg = promptDraft
+                                promptDraft = ""
+                                chatViewModel.sendMessage(msg)
+                            },
+                            onStopGeneration = chatViewModel::stopGeneration,
+                            onFixWorkflowAlert = {
+                                chatViewModel.fixPendingWorkflowAlert()
+                                onAskAgent()
+                            },
+                            onPickFilesClick = { filesPanelVisible = true },
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        )
+                    }
+                }
+            } else {
+                // Portrait Mode: Full-width spacious IB_AI Console, plus optional stacked File Viewer when user opens a file.
+                val selectedPath = state.selectedFilePath
+                Column(modifier = Modifier.fillMaxSize()) {
+                    if (selectedPath != null) {
+                        WorkspaceFileViewerPane(
+                            openTabs = state.openTabs,
+                            selectedFilePath = selectedPath,
+                            content = state.selectedFileContent,
+                            onSelectTab = viewModel::openFile,
+                            onCloseTab = viewModel::closeTab,
+                            onCloseViewer = viewModel::closeAllTabs,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                        )
+                        IbAiWorkspaceConsole(
+                            chatState = chatState,
+                            fullHeightMode = false,
+                            expanded = chatExpandedWhenViewingFile,
+                            promptDraft = promptDraft,
+                            hasActiveProject = state.activeProject != null,
+                            onPromptDraftChanged = { promptDraft = it },
+                            onToggleExpanded = { chatExpandedWhenViewingFile = !chatExpandedWhenViewingFile },
+                            onNewSessionClick = { showNewSessionDialog = true },
+                            onExpandFullChat = onAskAgent,
+                            onSendPrompt = {
+                                val msg = promptDraft
+                                promptDraft = ""
+                                chatViewModel.sendMessage(msg)
+                            },
+                            onStopGeneration = chatViewModel::stopGeneration,
+                            onFixWorkflowAlert = {
+                                chatViewModel.fixPendingWorkflowAlert()
+                                onAskAgent()
+                            },
+                            onPickFilesClick = { filesPanelVisible = true },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        IbAiWorkspaceConsole(
+                            chatState = chatState,
+                            fullHeightMode = true,
+                            expanded = true,
+                            promptDraft = promptDraft,
+                            hasActiveProject = state.activeProject != null,
+                            onPromptDraftChanged = { promptDraft = it },
+                            onToggleExpanded = {},
+                            onNewSessionClick = { showNewSessionDialog = true },
+                            onExpandFullChat = onAskAgent,
+                            onSendPrompt = {
+                                val msg = promptDraft
+                                promptDraft = ""
+                                chatViewModel.sendMessage(msg)
+                            },
+                            onStopGeneration = chatViewModel::stopGeneration,
+                            onFixWorkflowAlert = {
+                                chatViewModel.fixPendingWorkflowAlert()
+                                onAskAgent()
+                            },
+                            onPickFilesClick = { filesPanelVisible = true },
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                        )
+                    }
                 }
 
-                // 3. Center Split: Tabbed Line-Numbered Code Editor + Docked IB_AI Chat Drawer
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                ) {
-                    LineNumberedCodeEditorPane(
-                        openTabs = state.openTabs,
-                        selectedFilePath = state.selectedFilePath,
-                        content = state.selectedFileContent,
-                        isEditing = state.isEditingFile,
-                        hasActiveProject = state.activeProject != null,
-                        sidebarVisible = sidebarVisible,
-                        onShowSidebar = { sidebarVisible = true },
-                        onSelectTab = viewModel::openFile,
-                        onCloseTab = viewModel::closeTab,
-                        onToggleEdit = viewModel::setEditing,
-                        onSave = viewModel::saveFileContent,
-                        onNewFile = { showNewFileDialog = true },
-                        onNewFolder = { showNewFolderDialog = true },
-                        onImportZip = {
-                            importZipLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed"))
-                        },
-                        onExportZip = {
-                            val safeName = (state.activeProject?.name ?: "project")
-                                .replace(Regex("[^A-Za-z0-9._-]"), "_")
-                            exportZipLauncher.launch("$safeName.zip")
-                        },
-                        onOpenFullChat = onAskAgent,
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    DockedIbAiChatDrawer(
-                        chatState = chatState,
-                        expanded = chatDrawerExpanded,
-                        promptDraft = drawerPromptDraft,
-                        onPromptDraftChanged = { drawerPromptDraft = it },
-                        onToggleExpanded = { chatDrawerExpanded = !chatDrawerExpanded },
-                        onNewSessionClick = { showNewSessionDialog = true },
-                        onExpandFullChat = onAskAgent,
-                        onSendPrompt = {
-                            val msg = drawerPromptDraft
-                            drawerPromptDraft = ""
-                            chatViewModel.sendMessage(msg)
-                        },
-                        onStopGeneration = chatViewModel::stopGeneration,
-                        onFixWorkflowAlert = {
-                            chatViewModel.fixPendingWorkflowAlert()
-                            onAskAgent()
-                        }
-                    )
-                }
-
-                // 4. Right Utility Strip (shown on tablets/landscape)
-                if (isWideScreen) {
-                    VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    IdeRightUtilityStrip(
-                        chatExpanded = chatDrawerExpanded,
-                        onToggleChat = { chatDrawerExpanded = !chatDrawerExpanded },
-                        onNewSession = { showNewSessionDialog = true },
-                        onSwitchModel = { showSwitchModelDialog = true },
-                        onNewFile = { if (state.activeProject != null) showNewFileDialog = true else showCreateProject = true }
-                    )
+                // Portrait On-Demand Files Modal Bottom Sheet
+                if (filesPanelVisible) {
+                    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                    ModalBottomSheet(
+                        onDismissRequest = { filesPanelVisible = false },
+                        sheetState = sheetState,
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                    ) {
+                        WorkspaceFilesExplorerContent(
+                            section = activeFilesSection,
+                            onSelectSection = { activeFilesSection = it },
+                            activeProject = state.activeProject,
+                            nodes = state.fileTree,
+                            selectedFilePath = state.selectedFilePath,
+                            searchQuery = state.sidebarSearchQuery,
+                            searchResult = state.sidebarSearchResult,
+                            state = state,
+                            onClosePanel = { filesPanelVisible = false },
+                            onNewProject = {
+                                filesPanelVisible = false
+                                showCreateProject = true
+                            },
+                            onPickDeviceFolder = {
+                                filesPanelVisible = false
+                                openFolderLauncher.launch(null)
+                            },
+                            onSelectFile = { path ->
+                                viewModel.openFile(path)
+                                filesPanelVisible = false
+                            },
+                            onDeleteNode = { node -> pendingDeleteNode = node },
+                            onSearchQueryChanged = viewModel::setSidebarSearchQuery,
+                            onRunSearch = { viewModel.runSidebarSearch() },
+                            onNewFile = {
+                                filesPanelVisible = false
+                                showNewFileDialog = true
+                            },
+                            onNewFolder = {
+                                filesPanelVisible = false
+                                showNewFolderDialog = true
+                            },
+                            onImportZip = {
+                                filesPanelVisible = false
+                                importZipLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed"))
+                            },
+                            onExportZip = {
+                                filesPanelVisible = false
+                                val safeName = (state.activeProject?.name ?: "project")
+                                    .replace(Regex("[^A-Za-z0-9._-]"), "_")
+                                exportZipLauncher.launch("$safeName.zip")
+                            },
+                            onCommitGitHub = {
+                                filesPanelVisible = false
+                                viewModel.resetGitHubDialogFeedback()
+                                showGitHubPushDialog = true
+                            },
+                            onSyncNow = viewModel::syncNow,
+                            onPullGitHub = viewModel::pullFromGitHub,
+                            onToggleDirectGitHub = viewModel::toggleDirectGitHubMode,
+                            onOpenGitHubAccount = {
+                                filesPanelVisible = false
+                                onOpenGitHubAccount()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 340.dp, max = 560.dp)
+                        )
+                    }
                 }
             }
         }
@@ -339,7 +507,7 @@ fun WorkspaceScreen(
                     systemPrompt = prompt,
                     attachActiveProject = attachProject
                 )
-                chatDrawerExpanded = true
+                chatExpandedWhenViewingFile = true
                 showNewSessionDialog = false
             },
             onDismiss = { showNewSessionDialog = false }

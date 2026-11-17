@@ -40,7 +40,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,11 +60,9 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
-import androidx.credentials.exceptions.NoCredentialException
 import com.example.AppContainer
 import com.example.R
 import com.example.ui.theme.BrandWordmarkStyle
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
@@ -86,7 +83,6 @@ fun SignInGateScreen(
     val credentialManager = remember(context) { CredentialManager.create(context) }
 
     var isBusy by remember { mutableStateOf(false) }
-    var isCheckingSilent by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     suspend fun handleGoogleCredentialResult(credentialData: android.os.Bundle) {
@@ -104,38 +100,6 @@ fun SignInGateScreen(
             Log.e("Auth", "Invalid Google ID token", e)
             errorMessage = "Could not parse Google Sign-In response."
         }
-    }
-
-    // Silent auto sign-in check on launch for already-authorized accounts
-    LaunchedEffect(Unit) {
-        val activity = context.findActivity()
-        if (activity != null) {
-            try {
-                val clientId = context.getString(R.string.default_web_client_id)
-                val googleIdOption = GetGoogleIdOption.Builder()
-                    .setFilterByAuthorizedAccounts(true)
-                    .setServerClientId(clientId)
-                    .setAutoSelectEnabled(true)
-                    .build()
-                val request = GetCredentialRequest.Builder()
-                    .addCredentialOption(googleIdOption)
-                    .build()
-                val result = credentialManager.getCredential(activity, request)
-                val cred = result.credential
-                if (cred is CustomCredential &&
-                    cred.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
-                ) {
-                    handleGoogleCredentialResult(cred.data)
-                }
-            } catch (_: NoCredentialException) {
-                // First time or signed out; user taps Sign in with Google button.
-            } catch (_: GetCredentialCancellationException) {
-                // Ignored on silent launch check.
-            } catch (e: Exception) {
-                Log.w("Auth", "Silent sign-in skipped: ${e.message}")
-            }
-        }
-        isCheckingSilent = false
     }
 
     fun launchInteractiveGoogleSignIn() {
@@ -272,21 +236,21 @@ fun SignInGateScreen(
 
                         Button(
                             onClick = { launchInteractiveGoogleSignIn() },
-                            enabled = !isBusy && !isCheckingSilent,
+                            enabled = !isBusy,
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 50.dp)
                                 .testTag("gate_google_signin_button")
                         ) {
-                            if (isBusy || isCheckingSilent) {
+                            if (isBusy) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(18.dp),
                                     strokeWidth = 2.dp,
                                     color = MaterialTheme.colorScheme.onPrimary
                                 )
                                 Spacer(Modifier.width(8.dp))
-                                Text(if (isCheckingSilent) "Checking session..." else "Signing in...")
+                                Text("Signing in...")
                             } else {
                                 Icon(
                                     Icons.Rounded.AccountCircle,

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -122,7 +123,11 @@ fun ProjectsScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .navigationBarsPadding()
+    ) {
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             modifier = Modifier
@@ -136,9 +141,10 @@ fun ProjectsScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -150,12 +156,19 @@ fun ProjectsScreen(
                                 Icon(Icons.Rounded.Menu, contentDescription = "Open navigation sidebar")
                             }
                         }
-                        Column {
-                            Text("PROJECTS & HUB", style = BrandWordmarkStyle)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "PROJECTS & HUB",
+                                style = BrandWordmarkStyle,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                             Text(
                                 text = "${state.projects.size} workspace(s) • Sessions • GitHub CI",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
