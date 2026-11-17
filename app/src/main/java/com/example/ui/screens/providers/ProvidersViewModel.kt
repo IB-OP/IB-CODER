@@ -4,9 +4,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.AppContainer
+import com.example.data.network.InternetToolClient
 import com.example.data.network.ProviderRegistry
 import com.example.data.preferences.SettingsDataStore
 import com.example.domain.model.ConnectionTestResult
+import com.example.domain.model.CustomProviderDefinition
+import com.example.domain.model.ProviderApiDiscoveryResult
 import com.example.domain.model.ProviderCategory
 import com.example.domain.model.ProviderConfig
 import com.example.domain.model.ProviderMetadata
@@ -18,11 +21,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 enum class ProviderFilter {
     ALL,
     FREE_TIER,
     PAID_LOCAL,
+    CUSTOM,
     ENABLED
 }
 
@@ -36,19 +41,25 @@ data class ProviderCardUiState(
     val isManualModelEntry: Boolean = false,
     val isTesting: Boolean = false,
     val testResult: ConnectionTestResult? = null,
-    val toolSupportStatus: ToolSupportStatus = ToolSupportStatus.SUPPORTED
+    val toolSupportStatus: ToolSupportStatus = ToolSupportStatus.SUPPORTED,
+    val isUserCreatedCustom: Boolean = false
 )
 
 data class ProvidersUiState(
     val cards: List<ProviderCardUiState> = emptyList(),
+    val totalProviderCount: Int = 0,
     val searchQuery: String = "",
     val filter: ProviderFilter = ProviderFilter.ALL,
-    val expandedProviderId: String? = "coarena"
+    val expandedProviderId: String? = "coarena",
+    val apiDiscoveryQuery: String = "",
+    val apiDiscoveryResults: List<ProviderApiDiscoveryResult> = InternetToolClient.KNOWN_PROVIDER_APIS.take(6),
+    val isSearchingApiUrl: Boolean = false
 )
 
 class ProvidersViewModel(
     private val providerRegistry: ProviderRegistry,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val internetToolClient: InternetToolClient
 ) : ViewModel() {
 
     private val apiKeysState = MutableStateFlow<Map<String, String>>(emptyMap())
@@ -63,13 +74,18 @@ class ProvidersViewModel(
     private val filterState = MutableStateFlow(ProviderFilter.ALL)
     private val expandedId = MutableStateFlow<String?>("coarena")
 
+    private val discoveryQueryState = MutableStateFlow("")
+    private val discoveryResultsState = MutableStateFlow(InternetToolClient.KNOWN_PROVIDER_APIS.take(6))
+    private val searchingApiState = MutableStateFlow(false)
+
     private val _uiState = MutableStateFlow(ProvidersUiState())
     val uiState: StateFlow<ProvidersUiState> = _uiState.asStateFlow()
 
     init {
         viewModelScope.launch {
-            val ids = providerRegistry.adapters.map { it.metadata.id }
-            apiKeysState.value = settingsDataStore.getAllApiKeys(ids)
+            val builtInIds = providerRegistry.adapters.map { it.metadata.id }
+            val customIds = settingsDataStore.getCustomProviders().map { it.id }
+            apiKeysState.value = settingsDataStore.getAllApiKeys(builtInIds + customIds)
         }
 
         viewModelScope.launch {
@@ -91,8 +107,18 @@ class ProvidersViewModel(
             ) { manual, testing, tests, query, filter ->
                 FilterBundle(manual, testing, tests, query, filter)
             }
-            combine(leftFlow, rightFlow, expandedId) { left, right, expanded ->
-                val allCards = providerRegistry.adapters.map { adapter ->
+            val discoveryFlow = combine(
+                providerRegistry.customAdaptersFlow,
+                discoveryQueryState,
+                discoveryResultsState,
+                searchingApiState
+            ) { customAdapters, dQuery, dResults, dSearching ->
+                DiscoveryBundle(customAdapters.map { it.metadata.id }.toSet(), dQuery, dResults, dSearching)
+            }
+
+            combine(leftFlow, rightFlow, expandedId, discoveryFlow) { left, right, expanded, discovery ->
+                val allAdapters = providerRegistry.allAdapters()
+                val allCards = allAdapters.map { adapter ->
                     val id = adapter.metadata.id
                     val config = left.configs[id] ?: adapter.defaultConfig()
                     val cachedModels = left.modelsMap[id] ?: config.fetchedModels.map { modelId ->
@@ -114,7 +140,8 @@ class ProvidersViewModel(
                         isManualModelEntry = manual,
                         isTesting = id in right.testing,
                         testResult = right.tests[id],
-                        toolSupportStatus = toolSupport
+                        toolSupportStatus = toolSupport,
+                        isUserCreatedCustom = id in discovery.customIds
                     )
                 }
 
@@ -122,22 +149,29 @@ class ProvidersViewModel(
                     val matchesFilter = when (right.filter) {
                         ProviderFilter.ALL -> true
                         ProviderFilter.FREE_TIER -> card.metadata.category == ProviderCategory.FREE_TIER
-                        ProviderFilter.PAID_LOCAL -> card.metadata.category != ProviderCategory.FREE_TIER
+                        ProviderFilter.PAID_LOCAL -> card.metadata.category == ProviderCategory.PAID_POPULAR ||
+                            card.metadata.category == ProviderCategory.LOCAL
+                        ProviderFilter.CUSTOM -> card.metadata.category == ProviderCategory.CUSTOM
                         ProviderFilter.ENABLED -> card.config.enabled
                     }
                     val q = right.query.trim()
                     val matchesQuery = q.isEmpty() ||
                         card.metadata.displayName.contains(q, ignoreCase = true) ||
                         card.metadata.description.contains(q, ignoreCase = true) ||
+                        card.config.baseUrl.contains(q, ignoreCase = true) ||
                         card.config.selectedModel.contains(q, ignoreCase = true)
                     matchesFilter && matchesQuery
                 }
 
                 ProvidersUiState(
                     cards = filtered,
+                    totalProviderCount = allAdapters.size,
                     searchQuery = right.query,
                     filter = right.filter,
-                    expandedProviderId = expanded
+                    expandedProviderId = expanded,
+                    apiDiscoveryQuery = discovery.query,
+                    apiDiscoveryResults = discovery.results,
+                    isSearchingApiUrl = discovery.searching
                 )
             }.collect { state ->
                 _uiState.value = state
@@ -155,6 +189,86 @@ class ProvidersViewModel(
 
     fun toggleExpanded(providerId: String) {
         expandedId.value = if (expandedId.value == providerId) null else providerId
+    }
+
+    fun findApiEndpoint(query: String) {
+        discoveryQueryState.value = query
+        viewModelScope.launch {
+            searchingApiState.value = true
+            val found = internetToolClient.discoverApiEndpoint(query)
+            discoveryResultsState.value = found
+            searchingApiState.value = false
+        }
+    }
+
+    fun addCustomProvider(
+        name: String,
+        baseUrl: String,
+        apiKey: String,
+        defaultModel: String,
+        docsUrl: String?,
+        requiresApiKey: Boolean
+    ) {
+        val cleanName = name.trim().ifBlank { "Custom Provider" }
+        val normalizedUrl = normalizeBaseUrl(baseUrl)
+        if (normalizedUrl.isBlank()) return
+
+        val id = "custom_${UUID.randomUUID().toString().take(8)}"
+        val cleanModel = defaultModel.trim()
+        val def = CustomProviderDefinition(
+            id = id,
+            displayName = cleanName,
+            defaultBaseUrl = normalizedUrl,
+            description = "Custom OpenAI-compatible API ($normalizedUrl)",
+            signupUrl = docsUrl?.trim()?.takeIf { it.isNotBlank() },
+            requiresApiKey = requiresApiKey,
+            defaultModel = cleanModel
+        )
+
+        viewModelScope.launch {
+            settingsDataStore.saveCustomProvider(def)
+            val updatedDefs = settingsDataStore.getCustomProviders()
+            providerRegistry.syncCustomProviders(updatedDefs)
+
+            val cfg = ProviderConfig(
+                providerId = id,
+                baseUrl = normalizedUrl,
+                selectedModel = cleanModel,
+                enabled = true
+            )
+            settingsDataStore.saveProviderConfig(cfg)
+            val cleanKey = apiKey.trim()
+            if (cleanKey.isNotEmpty()) {
+                apiKeysState.update { it + (id to cleanKey) }
+                settingsDataStore.saveApiKey(id, cleanKey)
+            }
+            expandedId.value = id
+            filterState.value = ProviderFilter.ALL
+            searchQuery.value = ""
+
+            fetchModels(id)
+        }
+    }
+
+    fun deleteCustomProvider(providerId: String) {
+        if (!providerId.startsWith("custom_")) return
+        viewModelScope.launch {
+            settingsDataStore.deleteCustomProvider(providerId)
+            val updatedDefs = settingsDataStore.getCustomProviders()
+            providerRegistry.syncCustomProviders(updatedDefs)
+            apiKeysState.update { it - providerId }
+            if (expandedId.value == providerId) expandedId.value = null
+        }
+    }
+
+    private fun normalizeBaseUrl(raw: String): String {
+        val trimmed = raw.trim().trimEnd('/')
+        if (trimmed.isEmpty()) return ""
+        return if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+            trimmed
+        } else {
+            "https://$trimmed"
+        }
     }
 
     fun updateApiKey(providerId: String, newKey: String) {
@@ -247,12 +361,20 @@ class ProvidersViewModel(
         val filter: ProviderFilter
     )
 
+    private data class DiscoveryBundle(
+        val customIds: Set<String>,
+        val query: String,
+        val results: List<ProviderApiDiscoveryResult>,
+        val searching: Boolean
+    )
+
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return ProvidersViewModel(
                 providerRegistry = container.providerRegistry,
-                settingsDataStore = container.settingsDataStore
+                settingsDataStore = container.settingsDataStore,
+                internetToolClient = container.internetToolClient
             ) as T
         }
     }

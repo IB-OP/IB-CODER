@@ -2,100 +2,89 @@ package com.example.ui.screens.workspace
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.NoteAdd
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Archive
-import androidx.compose.material.icons.rounded.CloudUpload
-import androidx.compose.material.icons.rounded.CreateNewFolder
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Description
-import androidx.compose.material.icons.rounded.DriveFileRenameOutline
-import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.FolderOpen
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Save
-import androidx.compose.material.icons.rounded.SmartToy
-import androidx.compose.material.icons.rounded.Unarchive
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.model.FileNode
-import com.example.domain.model.GitHubSyncStatus
-import com.example.ui.components.SyntaxHighlighter
+import com.example.ui.components.CreateNewSessionDialog
+import com.example.ui.components.CreateProjectDialog
+import com.example.ui.screens.chat.ChatViewModel
+import com.example.ui.screens.chat.ProviderOptionUi
 import com.example.ui.theme.JetBrainsMonoFamily
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkspaceScreen(
     viewModel: WorkspaceViewModel,
-    onAskAgent: () -> Unit
+    chatViewModel: ChatViewModel,
+    onAskAgent: () -> Unit,
+    onOpenProviders: () -> Unit = {},
+    onOpenMcpServers: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    onOpenGitHubAccount: () -> Unit = {},
+    onOpenSidebar: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val chatState by chatViewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    var projectMenuOpen by remember { mutableStateOf(false) }
+    var activeSidebarSection by rememberSaveable { mutableStateOf(IdeSidebarSection.EXPLORER) }
+    var sidebarVisible by rememberSaveable { mutableStateOf(true) }
+    var chatDrawerExpanded by rememberSaveable { mutableStateOf(true) }
+    var drawerPromptDraft by rememberSaveable { mutableStateOf("") }
+
     var showCreateProject by remember { mutableStateOf(false) }
     var showRenameProject by remember { mutableStateOf(false) }
     var showDeleteProject by remember { mutableStateOf(false) }
     var showNewFileDialog by remember { mutableStateOf(false) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var showGitHubPushDialog by remember { mutableStateOf(false) }
+    var showNewSessionDialog by remember { mutableStateOf(false) }
+    var showSwitchModelDialog by remember { mutableStateOf(false) }
     var pendingDeleteNode by remember { mutableStateOf<FileNode?>(null) }
+
+    val openFolderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) viewModel.createProjectFromDeviceFolder(uri)
+    }
 
     val importZipLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -109,327 +98,268 @@ fun WorkspaceScreen(
         if (uri != null) viewModel.exportZip(context, uri)
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Box {
-                        Row(
-                            modifier = Modifier
-                                .clickable { projectMenuOpen = true }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(Icons.Rounded.FolderOpen, contentDescription = null)
-                            Text(
-                                text = state.activeProject?.name ?: "Workspace",
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = projectMenuOpen,
-                            onDismissRequest = { projectMenuOpen = false }
-                        ) {
-                            state.projects.forEach { proj ->
-                                DropdownMenuItem(
-                                    text = { Text(proj.name) },
-                                    onClick = {
-                                        viewModel.selectProject(proj.id)
-                                        projectMenuOpen = false
-                                    }
-                                )
-                            }
-                            if (state.projects.isNotEmpty()) HorizontalDivider()
-                            DropdownMenuItem(
-                                text = { Text("New Project") },
-                                leadingIcon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                                onClick = {
-                                    projectMenuOpen = false
-                                    showCreateProject = true
-                                }
-                            )
-                            if (state.activeProject != null) {
-                                DropdownMenuItem(
-                                    text = { Text("Rename Project") },
-                                    leadingIcon = { Icon(Icons.Rounded.DriveFileRenameOutline, contentDescription = null) },
-                                    onClick = {
-                                        projectMenuOpen = false
-                                        showRenameProject = true
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Delete Project") },
-                                    leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
-                                    onClick = {
-                                        projectMenuOpen = false
-                                        showDeleteProject = true
-                                    }
-                                )
-                            }
-                        }
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = { importZipLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed")) },
-                        modifier = Modifier.testTag("workspace_import_zip_button")
-                    ) {
-                        Icon(Icons.Rounded.Unarchive, contentDescription = "Import zip project")
-                    }
-                    if (state.activeProject != null) {
-                        IconButton(
-                            onClick = {
-                                viewModel.resetGitHubDialogFeedback()
-                                showGitHubPushDialog = true
-                            },
-                            modifier = Modifier.testTag("workspace_github_push_icon_button")
-                        ) {
-                            Icon(Icons.Rounded.CloudUpload, contentDescription = "Push project to GitHub")
-                        }
-                        IconButton(
-                            onClick = {
-                                val safeName = (state.activeProject?.name ?: "project")
-                                    .replace(Regex("[^A-Za-z0-9._-]"), "_")
-                                exportZipLauncher.launch("$safeName.zip")
-                            },
-                            modifier = Modifier.testTag("workspace_export_zip_button")
-                        ) {
-                            Icon(Icons.Rounded.Archive, contentDescription = "Export project as zip")
-                        }
-                        IconButton(
-                            onClick = viewModel::refreshTree,
-                            modifier = Modifier.testTag("workspace_refresh_button")
-                        ) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = "Refresh files")
-                        }
-                    }
-                }
-            )
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            state.statusMessage?.let { msg ->
-                Surface(
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            msg,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = viewModel::clearBanner) { Text("OK") }
-                    }
-                }
-            }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .imePadding()
+    ) {
+        IdeTopBar(
+            activeProject = state.activeProject,
+            allProjects = state.projects,
+            providerId = chatState.selectedProviderId,
+            modelId = chatState.selectedModelId,
+            onSelectProject = viewModel::selectProject,
+            onNewProject = { showCreateProject = true },
+            onRenameProject = { showRenameProject = true },
+            onDeleteProject = { showDeleteProject = true },
+            onRefreshTree = viewModel::refreshTree,
+            onSwitchModel = { showSwitchModelDialog = true },
+            onOpenSidebar = onOpenSidebar
+        )
 
-            state.errorMessage?.let { err ->
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            err,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = viewModel::clearBanner) { Text("Dismiss") }
-                    }
-                }
-            }
-
-            if (state.activeProject == null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Rounded.Folder,
-                            contentDescription = null,
-                            modifier = Modifier.size(56.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        Text("No Project Yet", style = MaterialTheme.typography.titleLarge)
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            "Create a workspace project or import an existing zip archive.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Button(
-                                onClick = { showCreateProject = true },
-                                modifier = Modifier.testTag("workspace_create_project_button")
-                            ) {
-                                Text("New Project")
-                            }
-                            OutlinedButton(
-                                onClick = { importZipLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed")) }
-                            ) {
-                                Text("Import Zip")
-                            }
-                        }
-                    }
-                }
-            } else {
-                // Action toolbar for active project
+        state.statusMessage?.let { msg ->
+            Surface(
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                shape = RoundedCornerShape(4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedButton(
-                        onClick = { showNewFileDialog = true },
-                        modifier = Modifier.testTag("workspace_new_file_button")
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.NoteAdd, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("New File")
-                    }
-                    OutlinedButton(
-                        onClick = { showNewFolderDialog = true },
-                        modifier = Modifier.testTag("workspace_new_folder_button")
-                    ) {
-                        Icon(Icons.Rounded.CreateNewFolder, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("New Folder")
-                    }
-                    Button(
-                        onClick = onAskAgent,
-                        modifier = Modifier.testTag("workspace_ask_agent_button")
-                    ) {
-                        Icon(Icons.Rounded.SmartToy, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Ask Agent")
-                    }
-                    OutlinedButton(
-                        onClick = {
+                    Text(
+                        msg,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = viewModel::clearBanner) { Text("OK") }
+                }
+            }
+        }
+
+        state.errorMessage?.let { err ->
+            Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = RoundedCornerShape(4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        err,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = viewModel::clearBanner) { Text("Dismiss") }
+                }
+            }
+        }
+
+        BoxWithConstraints(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
+            val isWideScreen = maxWidth >= 600.dp
+            val sidebarWidth = if (isWideScreen) 232.dp else 184.dp
+
+            Row(modifier = Modifier.fillMaxSize()) {
+                // 1. Left IDE Activity Rail
+                IdeActivityRail(
+                    activeSection = activeSidebarSection,
+                    sidebarVisible = sidebarVisible,
+                    onSelectSection = { target ->
+                        if (sidebarVisible && activeSidebarSection == target) {
+                            sidebarVisible = false
+                        } else {
+                            activeSidebarSection = target
+                            sidebarVisible = true
+                        }
+                    },
+                    onOpenProviders = onOpenProviders,
+                    onOpenMcp = onOpenMcpServers,
+                    onOpenSettings = onOpenSettings
+                )
+                VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // 2. Collapsible Side Pane (PROJECTS / SEARCH / SOURCE CONTROL)
+                if (sidebarVisible) {
+                    IdeSidebarPane(
+                        section = activeSidebarSection,
+                        activeProject = state.activeProject,
+                        nodes = state.fileTree,
+                        selectedFilePath = state.selectedFilePath,
+                        searchQuery = state.sidebarSearchQuery,
+                        searchResult = state.sidebarSearchResult,
+                        state = state,
+                        onCollapse = { sidebarVisible = false },
+                        onNewProject = { showCreateProject = true },
+                        onPickDeviceFolder = { openFolderLauncher.launch(null) },
+                        onSelectFile = { path -> viewModel.openFile(path) },
+                        onDeleteNode = { node -> pendingDeleteNode = node },
+                        onSearchQueryChanged = viewModel::setSidebarSearchQuery,
+                        onRunSearch = { viewModel.runSidebarSearch() },
+                        onNewFile = { showNewFileDialog = true },
+                        onCommitGitHub = {
                             viewModel.resetGitHubDialogFeedback()
                             showGitHubPushDialog = true
                         },
-                        modifier = Modifier.testTag("workspace_push_github_button")
-                    ) {
-                        Icon(Icons.Rounded.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            if (state.activeProjectGitHubConfig?.repo?.isNotBlank() == true) "GitHub"
-                            else "Push to GitHub"
-                        )
-                    }
-                    if (state.activeProjectGitHubConfig?.repo?.isNotBlank() == true) {
-                        OutlinedButton(
-                            onClick = viewModel::syncNow,
-                            enabled = state.activeProjectSyncStatus !is GitHubSyncStatus.Syncing,
-                            modifier = Modifier.testTag("workspace_sync_now_button")
-                        ) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                when (val sync = state.activeProjectSyncStatus) {
-                                    is GitHubSyncStatus.Syncing -> "Syncing..."
-                                    is GitHubSyncStatus.Synced -> "Synced ${sync.commitSha.take(6)}"
-                                    is GitHubSyncStatus.Error -> "Sync Error"
-                                    GitHubSyncStatus.Idle ->
-                                        if (state.activeProjectGitHubConfig?.autoSyncEnabled == true) "Auto-Sync On"
-                                        else "Sync Now"
-                                }
-                            )
-                        }
-                    }
+                        onSyncNow = viewModel::syncNow,
+                        onPullGitHub = viewModel::pullFromGitHub,
+                        onToggleDirectGitHub = viewModel::toggleDirectGitHubMode,
+                        onOpenGitHubAccount = onOpenGitHubAccount,
+                        modifier = Modifier.width(sidebarWidth)
+                    )
+                    VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
 
-                BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                    val isWide = maxWidth >= 700.dp
-                    if (isWide) {
-                        Row(modifier = Modifier.fillMaxSize()) {
-                            FileTreePane(
-                                nodes = state.fileTree,
-                                selectedPath = state.selectedFilePath,
-                                onSelectFile = viewModel::openFile,
-                                onDeleteNode = { pendingDeleteNode = it },
-                                modifier = Modifier
-                                    .width(300.dp)
-                                    .fillMaxHeight()
-                            )
-                            HorizontalDivider(modifier = Modifier.width(1.dp).fillMaxHeight())
-                            CodeViewerPane(
-                                filePath = state.selectedFilePath,
-                                content = state.selectedFileContent,
-                                isEditing = state.isEditingFile,
-                                onToggleEdit = viewModel::setEditing,
-                                onSave = viewModel::saveFileContent,
-                                onClose = null,
-                                modifier = Modifier.weight(1f).fillMaxHeight()
-                            )
+                // 3. Center Split: Tabbed Line-Numbered Code Editor + Docked IB_AI Chat Drawer
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                ) {
+                    LineNumberedCodeEditorPane(
+                        openTabs = state.openTabs,
+                        selectedFilePath = state.selectedFilePath,
+                        content = state.selectedFileContent,
+                        isEditing = state.isEditingFile,
+                        hasActiveProject = state.activeProject != null,
+                        sidebarVisible = sidebarVisible,
+                        onShowSidebar = { sidebarVisible = true },
+                        onSelectTab = viewModel::openFile,
+                        onCloseTab = viewModel::closeTab,
+                        onToggleEdit = viewModel::setEditing,
+                        onSave = viewModel::saveFileContent,
+                        onNewFile = { showNewFileDialog = true },
+                        onNewFolder = { showNewFolderDialog = true },
+                        onImportZip = {
+                            importZipLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed"))
+                        },
+                        onExportZip = {
+                            val safeName = (state.activeProject?.name ?: "project")
+                                .replace(Regex("[^A-Za-z0-9._-]"), "_")
+                            exportZipLauncher.launch("$safeName.zip")
+                        },
+                        onOpenFullChat = onAskAgent,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    DockedIbAiChatDrawer(
+                        chatState = chatState,
+                        expanded = chatDrawerExpanded,
+                        promptDraft = drawerPromptDraft,
+                        onPromptDraftChanged = { drawerPromptDraft = it },
+                        onToggleExpanded = { chatDrawerExpanded = !chatDrawerExpanded },
+                        onNewSessionClick = { showNewSessionDialog = true },
+                        onExpandFullChat = onAskAgent,
+                        onSendPrompt = {
+                            val msg = drawerPromptDraft
+                            drawerPromptDraft = ""
+                            chatViewModel.sendMessage(msg)
+                        },
+                        onStopGeneration = chatViewModel::stopGeneration,
+                        onFixWorkflowAlert = {
+                            chatViewModel.fixPendingWorkflowAlert()
+                            onAskAgent()
                         }
-                    } else {
-                        if (state.selectedFilePath == null) {
-                            FileTreePane(
-                                nodes = state.fileTree,
-                                selectedPath = null,
-                                onSelectFile = viewModel::openFile,
-                                onDeleteNode = { pendingDeleteNode = it },
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            CodeViewerPane(
-                                filePath = state.selectedFilePath,
-                                content = state.selectedFileContent,
-                                isEditing = state.isEditingFile,
-                                onToggleEdit = viewModel::setEditing,
-                                onSave = viewModel::saveFileContent,
-                                onClose = viewModel::closeFileViewer,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                    }
+                    )
+                }
+
+                // 4. Right Utility Strip (shown on tablets/landscape)
+                if (isWideScreen) {
+                    VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    IdeRightUtilityStrip(
+                        chatExpanded = chatDrawerExpanded,
+                        onToggleChat = { chatDrawerExpanded = !chatDrawerExpanded },
+                        onNewSession = { showNewSessionDialog = true },
+                        onSwitchModel = { showSwitchModelDialog = true },
+                        onNewFile = { if (state.activeProject != null) showNewFileDialog = true else showCreateProject = true }
+                    )
                 }
             }
         }
     }
 
     if (showCreateProject) {
-        TextInputDialog(
-            title = "Create Project",
-            label = "Project Name",
-            initialValue = "",
-            onConfirm = {
-                viewModel.createProject(it)
+        CreateProjectDialog(
+            isGitHubSignedIn = state.savedGitHubToken.isNotBlank(),
+            defaultGitHubOwner = state.defaultGitHubOwner,
+            repositories = state.availableGitHubRepos,
+            isLoadingRepos = state.isLoadingGitHubRepos,
+            isBusy = state.isBusy,
+            onPickDeviceFolder = {
+                showCreateProject = false
+                openFolderLauncher.launch(null)
+            },
+            onCreateLocalProject = { name ->
+                viewModel.createProject(name)
                 showCreateProject = false
             },
+            onCreateDirectGitHubProject = { owner, repo, branch, isPrivate, createNewRepo, includeWorkflow, autoFix ->
+                viewModel.createDirectGitHubProject(
+                    owner = owner,
+                    repo = repo,
+                    branch = branch,
+                    isPrivate = isPrivate,
+                    createNewRepo = createNewRepo,
+                    includeWorkflow = includeWorkflow,
+                    autoFixWorkflowBugs = autoFix
+                )
+                showCreateProject = false
+            },
+            onLoadRepositories = viewModel::loadGitHubRepositories,
+            onOpenGitHubAccount = {
+                showCreateProject = false
+                onOpenGitHubAccount()
+            },
             onDismiss = { showCreateProject = false }
+        )
+    }
+
+    if (showNewSessionDialog) {
+        CreateNewSessionDialog(
+            hasActiveProject = state.activeProject != null,
+            activeProjectName = state.activeProject?.name,
+            onStartSession = { mode, presetId, presetTitle, prompt, attachProject ->
+                chatViewModel.startNewConfiguredSession(
+                    mode = mode,
+                    presetId = presetId,
+                    presetTitle = presetTitle,
+                    systemPrompt = prompt,
+                    attachActiveProject = attachProject
+                )
+                chatDrawerExpanded = true
+                showNewSessionDialog = false
+            },
+            onDismiss = { showNewSessionDialog = false }
+        )
+    }
+
+    if (showSwitchModelDialog) {
+        SwitchIdeModelDialog(
+            currentProviderId = chatState.selectedProviderId,
+            currentModelId = chatState.selectedModelId,
+            options = chatState.providerOptions,
+            onConfirm = { provId, modId ->
+                chatViewModel.selectProviderAndModel(provId, modId)
+                showSwitchModelDialog = false
+            },
+            onOpenProviders = {
+                showSwitchModelDialog = false
+                onOpenProviders()
+            },
+            onDismiss = { showSwitchModelDialog = false }
         )
     }
 
@@ -447,10 +377,19 @@ fun WorkspaceScreen(
     }
 
     if (showDeleteProject && state.activeProject != null) {
+        val activeProj = state.activeProject!!
         AlertDialog(
             onDismissRequest = { showDeleteProject = false },
-            title = { Text("Delete Project") },
-            text = { Text("Permanently delete '${state.activeProject!!.name}' and all its files?") },
+            title = { Text(if (activeProj.isDeviceFolder) "Unlink Device Folder" else "Delete Project") },
+            text = {
+                Text(
+                    if (activeProj.isDeviceFolder) {
+                        "Remove '${activeProj.name}' from IB CODER? Your real folder and files in the Files app will NOT be deleted."
+                    } else {
+                        "Permanently delete '${activeProj.name}' and all its files?"
+                    }
+                )
+            },
             confirmButton = {
                 Button(
                     onClick = {
@@ -459,7 +398,7 @@ fun WorkspaceScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Delete")
+                    Text(if (activeProj.isDeviceFolder) "Remove" else "Delete")
                 }
             },
             dismissButton = {
@@ -471,7 +410,7 @@ fun WorkspaceScreen(
     if (showNewFileDialog) {
         TextInputDialog(
             title = "New File",
-            label = "Relative Path (e.g. app/src/main/Main.kt)",
+            label = "Relative Path (e.g. src/app.js or app/Main.kt)",
             initialValue = "",
             onConfirm = {
                 viewModel.createNewFile(it)
@@ -528,205 +467,120 @@ fun WorkspaceScreen(
 }
 
 @Composable
-private fun FileTreePane(
-    nodes: List<FileNode>,
-    selectedPath: String?,
-    onSelectFile: (String) -> Unit,
-    onDeleteNode: (FileNode) -> Unit,
-    modifier: Modifier = Modifier
+private fun SwitchIdeModelDialog(
+    currentProviderId: String,
+    currentModelId: String,
+    options: List<ProviderOptionUi>,
+    onConfirm: (String, String) -> Unit,
+    onOpenProviders: () -> Unit,
+    onDismiss: () -> Unit
 ) {
-    if (nodes.isEmpty()) {
-        Box(modifier = modifier.padding(24.dp), contentAlignment = Alignment.Center) {
-            Text(
-                text = "Workspace is empty. Create a file or ask the AI agent to build an app here.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        return
+    var selectedProviderId by remember { mutableStateOf(currentProviderId) }
+    val selectedOption = options.firstOrNull { it.metadata.id == selectedProviderId }
+    var modelInput by remember(selectedProviderId) {
+        mutableStateOf(
+            if (selectedProviderId == currentProviderId && currentModelId.isNotBlank()) {
+                currentModelId
+            } else {
+                selectedOption?.config?.selectedModel.orEmpty()
+            }
+        )
     }
+    var providerMenuOpen by remember { mutableStateOf(false) }
+    var modelMenuOpen by remember { mutableStateOf(false) }
 
-    LazyColumn(
-        modifier = modifier,
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        items(nodes, key = { it.relativePath }) { node ->
-            val isSelected = node.relativePath == selectedPath
-            Surface(
-                onClick = { if (!node.isDirectory) onSelectFile(node.relativePath) },
-                color = if (isSelected) {
-                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerLow
-                },
-                shape = RoundedCornerShape(10.dp),
-                border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = (10 + node.depth * 14).dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = if (node.isDirectory) Icons.Rounded.Folder else Icons.Rounded.Description,
-                        contentDescription = null,
-                        tint = if (node.isDirectory) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Switch Provider & Model") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = selectedOption?.metadata?.displayName ?: selectedProviderId,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Provider") },
+                        trailingIcon = { Icon(Icons.Rounded.ExpandMore, contentDescription = null) },
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = node.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = JetBrainsMonoFamily,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clickable { providerMenuOpen = true }
                     )
-                    if (!node.isDirectory) {
-                        Text(
-                            text = "${node.sizeBytes}B",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(
-                        onClick = { onDeleteNode(node) },
-                        modifier = Modifier.size(36.dp)
+                    DropdownMenu(
+                        expanded = providerMenuOpen,
+                        onDismissRequest = { providerMenuOpen = false },
+                        modifier = Modifier.heightIn(max = 300.dp)
                     ) {
-                        Icon(
-                            Icons.Rounded.Delete,
-                            contentDescription = "Delete ${node.name}",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        options.forEach { opt ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = opt.metadata.displayName,
+                                        fontWeight = if (opt.config.enabled) FontWeight.SemiBold else FontWeight.Normal
+                                    )
+                                },
+                                onClick = {
+                                    selectedProviderId = opt.metadata.id
+                                    providerMenuOpen = false
+                                }
+                            )
+                        }
                     }
+                }
+
+                val fetched = selectedOption?.config?.fetchedModels.orEmpty()
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = modelInput,
+                        onValueChange = { modelInput = it },
+                        label = { Text(if (fetched.isNotEmpty()) "Model ID (${fetched.size} fetched)" else "Model ID") },
+                        trailingIcon = {
+                            if (fetched.isNotEmpty()) {
+                                IconButton(onClick = { modelMenuOpen = true }) {
+                                    Icon(Icons.Rounded.ExpandMore, contentDescription = "Pick fetched model")
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMonoFamily),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    DropdownMenu(
+                        expanded = modelMenuOpen,
+                        onDismissRequest = { modelMenuOpen = false },
+                        modifier = Modifier.heightIn(max = 260.dp)
+                    ) {
+                        fetched.take(50).forEach { id ->
+                            DropdownMenuItem(
+                                text = { Text(id, fontFamily = JetBrainsMonoFamily) },
+                                onClick = {
+                                    modelInput = id
+                                    modelMenuOpen = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                TextButton(onClick = onOpenProviders) {
+                    Text("Configure Keys & Custom Providers")
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun CodeViewerPane(
-    filePath: String?,
-    content: String,
-    isEditing: Boolean,
-    onToggleEdit: (Boolean) -> Unit,
-    onSave: (String, String) -> Unit,
-    onClose: (() -> Unit)?,
-    modifier: Modifier = Modifier
-) {
-    if (filePath == null) {
-        Box(modifier = modifier.padding(24.dp), contentAlignment = Alignment.Center) {
-            Text(
-                text = "Select a file from the tree to inspect or edit.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        return
-    }
-
-    var draft by remember(filePath, content) { mutableStateOf(content) }
-    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val ext = filePath.substringAfterLast('.', "")
-    val highlighted = remember(content, ext, isDark) {
-        SyntaxHighlighter.highlight(content, ext, isDark)
-    }
-
-    Column(modifier = modifier) {
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(selectedProviderId, modelInput.trim()) },
+                enabled = modelInput.isNotBlank()
             ) {
-                if (onClose != null) {
-                    IconButton(
-                        onClick = onClose,
-                        modifier = Modifier.testTag("code_viewer_back_button")
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back to file tree")
-                    }
-                }
-                Text(
-                    text = filePath,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontFamily = JetBrainsMonoFamily,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f).padding(horizontal = 6.dp)
-                )
-                if (isEditing) {
-                    TextButton(onClick = {
-                        draft = content
-                        onToggleEdit(false)
-                    }) {
-                        Text("Cancel")
-                    }
-                    Button(
-                        onClick = { onSave(filePath, draft) },
-                        modifier = Modifier.testTag("code_viewer_save_button")
-                    ) {
-                        Icon(Icons.Rounded.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Save")
-                    }
-                } else {
-                    OutlinedButton(
-                        onClick = { onToggleEdit(true) },
-                        modifier = Modifier.testTag("code_viewer_edit_button")
-                    ) {
-                        Icon(Icons.Rounded.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Edit")
-                    }
-                }
+                Text("Apply")
             }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
-
-        if (isEditing) {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(10.dp)
-                    .testTag("code_editor_input"),
-                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                    fontFamily = JetBrainsMonoFamily,
-                    fontSize = 13.sp,
-                    lineHeight = 20.sp
-                ),
-                shape = RoundedCornerShape(12.dp)
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surfaceContainerLowest)
-                    .verticalScroll(rememberScrollState())
-                    .horizontalScroll(rememberScrollState())
-                    .padding(14.dp)
-            ) {
-                SelectionContainer {
-                    Text(
-                        text = highlighted,
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 13.sp,
-                        lineHeight = 20.sp
-                    )
-                }
-            }
-        }
-    }
+    )
 }
 
 @Composable

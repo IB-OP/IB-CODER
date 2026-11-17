@@ -42,6 +42,24 @@ data class ProviderMetadata(
     val modelPlaceholder: String = "Enter model ID"
 )
 
+@Serializable
+data class CustomProviderDefinition(
+    val id: String,
+    val displayName: String,
+    val defaultBaseUrl: String,
+    val description: String = "Custom OpenAI-compatible API endpoint",
+    val signupUrl: String? = null,
+    val requiresApiKey: Boolean = true,
+    val defaultModel: String = ""
+)
+
+data class ProviderApiDiscoveryResult(
+    val name: String,
+    val baseUrl: String,
+    val docsUrl: String? = null,
+    val note: String = ""
+)
+
 data class ProviderModel(
     val id: String,
     val displayName: String = id,

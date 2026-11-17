@@ -12,7 +12,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-class KeystoreCryptoManager {
+open class KeystoreCryptoManager {
 
     private val mutex = Mutex()
 
@@ -38,7 +38,7 @@ class KeystoreCryptoManager {
         return keyGenerator.generateKey()
     }
 
-    suspend fun encrypt(plaintext: String): String = mutex.withLock {
+    open suspend fun encrypt(plaintext: String): String = mutex.withLock {
         if (plaintext.isEmpty()) return@withLock ""
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
@@ -49,7 +49,7 @@ class KeystoreCryptoManager {
         "$ivB64:$cipherB64"
     }
 
-    suspend fun decrypt(encoded: String): String = mutex.withLock {
+    open suspend fun decrypt(encoded: String): String = mutex.withLock {
         if (encoded.isBlank()) return@withLock ""
         val parts = encoded.split(":", limit = 2)
         if (parts.size != 2) return@withLock ""

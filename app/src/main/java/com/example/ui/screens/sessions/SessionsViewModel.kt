@@ -4,15 +4,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.AppContainer
+import com.example.data.preferences.SettingsDataStore
 import com.example.data.repository.ChatRepository
 import com.example.data.workspace.WorkspaceManager
 import com.example.domain.model.ChatSession
+import com.example.domain.model.SessionMode
+import com.example.domain.model.SessionPromptConfig
 import com.example.domain.model.WorkspaceProject
+import com.example.domain.prompt.SystemPromptPresets
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 
@@ -27,7 +32,8 @@ data class SessionsUiState(
 class SessionsViewModel(
     private val container: AppContainer,
     private val chatRepository: ChatRepository,
-    private val workspaceManager: WorkspaceManager
+    private val workspaceManager: WorkspaceManager,
+    private val settingsDataStore: SettingsDataStore
 ) : ViewModel() {
 
     private val searchQuery = MutableStateFlow("")
@@ -43,10 +49,19 @@ class SessionsViewModel(
                 filteredSessions,
                 workspaceManager.observeProjects(),
                 container.selectedSessionId,
-                searchQuery
-            ) { sessions, projects, activeId, query ->
+                searchQuery,
+                settingsDataStore.sessionPromptConfigsFlow
+            ) { sessions, projects, activeId, query, promptConfigs ->
+                val enriched = sessions.map { s ->
+                    val cfg = promptConfigs[s.id]
+                    if (cfg != null) {
+                        s.copy(mode = cfg.mode, presetTitle = cfg.presetTitle)
+                    } else {
+                        s
+                    }
+                }
                 SessionsUiState(
-                    sessions = sessions,
+                    sessions = enriched,
                     projectsById = projects.associateBy { it.id },
                     activeSessionId = activeId,
                     searchQuery = query
@@ -65,8 +80,40 @@ class SessionsViewModel(
         container.selectedSessionId.value = sessionId
     }
 
-    fun createNewSession() {
-        container.selectedSessionId.value = null
+    fun createNewSession(
+        mode: SessionMode = SessionMode.NORMAL,
+        presetId: String = "normal",
+        presetTitle: String = "Normal Q&A",
+        systemPrompt: String = SystemPromptPresets.NORMAL_QA_PROMPT
+    ) {
+        viewModelScope.launch {
+            val settings = settingsDataStore.getSettings()
+            val activeProjectId = if (mode == SessionMode.NORMAL) {
+                null
+            } else {
+                settingsDataStore.activeProjectIdFlow.first()
+            }
+            val title = if (mode == SessionMode.NORMAL) "Normal Question" else presetTitle
+            val created = chatRepository.createSession(
+                title = title,
+                projectId = activeProjectId,
+                providerId = settings.defaultProviderId,
+                modelId = settings.defaultModelId
+            )
+            settingsDataStore.saveSessionPromptConfig(
+                created.id,
+                SessionPromptConfig(
+                    mode = mode,
+                    presetId = presetId,
+                    presetTitle = presetTitle,
+                    systemPrompt = systemPrompt.ifBlank {
+                        if (mode == SessionMode.NORMAL) SystemPromptPresets.NORMAL_QA_PROMPT
+                        else settings.systemPrompt
+                    }
+                )
+            )
+            container.selectedSessionId.value = created.id
+        }
     }
 
     fun renameSession(sessionId: String, newTitle: String) {
@@ -80,6 +127,7 @@ class SessionsViewModel(
             if (container.selectedSessionId.value == sessionId) {
                 container.selectedSessionId.value = null
             }
+            settingsDataStore.deleteSessionPromptConfig(sessionId)
             chatRepository.deleteSession(sessionId)
         }
     }
@@ -90,7 +138,8 @@ class SessionsViewModel(
             return SessionsViewModel(
                 container = container,
                 chatRepository = container.chatRepository,
-                workspaceManager = container.workspaceManager
+                workspaceManager = container.workspaceManager,
+                settingsDataStore = container.settingsDataStore
             ) as T
         }
     }

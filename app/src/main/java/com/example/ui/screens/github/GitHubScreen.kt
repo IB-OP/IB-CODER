@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -59,7 +60,8 @@ import com.example.ui.theme.JetBrainsMonoFamily
 fun GitHubScreen(
     viewModel: GitHubViewModel,
     onLaunchAiFix: (projectId: String?, prompt: String) -> Unit,
-    onOpenWorkspace: () -> Unit
+    onOpenWorkspace: () -> Unit,
+    onOpenSidebar: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -80,6 +82,16 @@ fun GitHubScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
+                        }
+                    }
+                },
+                navigationIcon = {
+                    if (onOpenSidebar != null) {
+                        IconButton(
+                            onClick = onOpenSidebar,
+                            modifier = Modifier.testTag("github_menu_button")
+                        ) {
+                            Icon(Icons.Rounded.Menu, contentDescription = "Open navigation sidebar")
                         }
                     }
                 }
@@ -210,6 +222,7 @@ fun GitHubScreen(
                                 onLinkWorkspace = viewModel::linkExistingWorkspaceToSelectedRepo,
                                 onPullIntoProject = viewModel::pullSelectedRepoIntoProject,
                                 onToggleAutoSync = viewModel::toggleProjectAutoSync,
+                                onToggleDirectMode = viewModel::toggleProjectDirectMode,
                                 onToggleAutoFix = viewModel::toggleProjectAutoFix,
                                 onSyncNow = viewModel::syncWorkspaceNow,
                                 onToggleBuildPlayBundle = viewModel::setBuildPlayBundleOnDispatch,
@@ -268,13 +281,14 @@ fun GitHubScreen(
     cloningRepo?.let { repo ->
         CloneRepositoryDialog(
             repo = repo,
-            onConfirm = { branch, autoSync, autoFix ->
+            onConfirm = { branch, autoSync, autoFix, directMode ->
                 cloningRepo = null
                 viewModel.cloneRepoToWorkspace(
                     repo = repo,
                     branch = branch,
                     enableAutoSync = autoSync,
                     enableAutoFix = autoFix,
+                    directGitHubMode = directMode,
                     onOpenWorkspace = onOpenWorkspace
                 )
             },
@@ -460,22 +474,23 @@ private fun DeleteRepositoryDialog(
 @Composable
 private fun CloneRepositoryDialog(
     repo: GitHubRepositorySummary,
-    onConfirm: (branch: String, enableAutoSync: Boolean, enableAutoFix: Boolean) -> Unit,
+    onConfirm: (branch: String, enableAutoSync: Boolean, enableAutoFix: Boolean, directGitHubMode: Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     var branch by remember(repo.id) { mutableStateOf(repo.defaultBranch.ifBlank { "main" }) }
+    var directMode by remember { mutableStateOf(true) }
     var autoSync by remember { mutableStateOf(true) }
     var autoFix by remember { mutableStateOf(true) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Clone ${repo.name}") },
+        title = { Text("Open ${repo.name} on GitHub") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     value = branch,
                     onValueChange = { branch = it },
-                    label = { Text("Branch") },
+                    label = { Text("Branch (default: main)") },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = JetBrainsMonoFamily),
                     modifier = Modifier.fillMaxWidth()
@@ -486,14 +501,35 @@ private fun CloneRepositoryDialog(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Auto-Sync to GitHub", style = MaterialTheme.typography.bodyMedium)
+                        Text("Direct GitHub Mode", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Automatically commit & push file edits",
+                            "Commit every file edit & AI change directly to GitHub",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Switch(checked = autoSync, onCheckedChange = { autoSync = it })
+                    Switch(
+                        checked = directMode,
+                        onCheckedChange = {
+                            directMode = it
+                            if (it) autoSync = true
+                        }
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Auto-Sync to GitHub", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Automatically push file edits",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = autoSync || directMode, onCheckedChange = { autoSync = it })
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -514,10 +550,10 @@ private fun CloneRepositoryDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(branch.trim().ifBlank { "main" }, autoSync, autoFix) },
+                onClick = { onConfirm(branch.trim().ifBlank { "main" }, autoSync || directMode, autoFix, directMode) },
                 enabled = branch.isNotBlank()
             ) {
-                Text("Clone & Open")
+                Text(if (directMode) "Open Direct" else "Clone & Open")
             }
         },
         dismissButton = {

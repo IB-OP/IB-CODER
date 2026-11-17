@@ -28,20 +28,26 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.NetworkCheck
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -76,8 +82,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.domain.model.ProviderApiDiscoveryResult
 import com.example.domain.model.ProviderCategory
 import com.example.domain.model.ToolSupportStatus
 import com.example.ui.theme.JetBrainsMonoFamily
@@ -86,9 +94,11 @@ import com.example.ui.theme.JetBrainsMonoFamily
 @Composable
 fun ProvidersScreen(
     viewModel: ProvidersViewModel,
-    onNavigateBack: (() -> Unit)? = null
+    onNavigateBack: (() -> Unit)? = null,
+    onOpenSidebar: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    var showAddCustomDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -97,14 +107,21 @@ fun ProvidersScreen(
                     Column {
                         Text("AI Providers", style = MaterialTheme.typography.titleLarge)
                         Text(
-                            "Keys stored on-device with Android Keystore",
+                            "${state.totalProviderCount} providers • Synced to your account",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 },
                 navigationIcon = {
-                    if (onNavigateBack != null) {
+                    if (onOpenSidebar != null) {
+                        IconButton(
+                            onClick = onOpenSidebar,
+                            modifier = Modifier.testTag("providers_menu_button")
+                        ) {
+                            Icon(Icons.Rounded.Menu, contentDescription = "Open navigation sidebar")
+                        }
+                    } else if (onNavigateBack != null) {
                         IconButton(
                             onClick = onNavigateBack,
                             modifier = Modifier.testTag("providers_back_button")
@@ -114,6 +131,16 @@ fun ProvidersScreen(
                                 contentDescription = "Back"
                             )
                         }
+                    }
+                },
+                actions = {
+                    TextButton(
+                        onClick = { showAddCustomDialog = true },
+                        modifier = Modifier.testTag("providers_add_custom_top_button")
+                    ) {
+                        Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Add Custom")
                     }
                 }
             )
@@ -137,7 +164,7 @@ fun ProvidersScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                         .testTag("provider_search_input"),
-                    placeholder = { Text("Search 23 providers or models...") },
+                    placeholder = { Text("Search providers, URLs, or models...") },
                     leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
                     trailingIcon = {
                         if (state.searchQuery.isNotEmpty()) {
@@ -147,7 +174,7 @@ fun ProvidersScreen(
                         }
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(14.dp)
+                    shape = RoundedCornerShape(8.dp)
                 )
 
                 Row(
@@ -176,6 +203,12 @@ fun ProvidersScreen(
                         modifier = Modifier.testTag("filter_paid")
                     )
                     FilterChip(
+                        selected = state.filter == ProviderFilter.CUSTOM,
+                        onClick = { viewModel.setFilter(ProviderFilter.CUSTOM) },
+                        label = { Text("Custom") },
+                        modifier = Modifier.testTag("filter_custom")
+                    )
+                    FilterChip(
                         selected = state.filter == ProviderFilter.ENABLED,
                         onClick = { viewModel.setFilter(ProviderFilter.ENABLED) },
                         label = { Text("Enabled") },
@@ -188,6 +221,51 @@ fun ProvidersScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    item(key = "add_custom_banner") {
+                        Card(
+                            onClick = { showAddCustomDialog = true },
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                            ),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("providers_add_custom_banner")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Public,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Add Your Own Custom Provider",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Find any OpenAI-compatible API URL online, paste the link, and add your API key.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Button(onClick = { showAddCustomDialog = true }) {
+                                    Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Create")
+                                }
+                            }
+                        }
+                    }
+
                     items(state.cards, key = { it.metadata.id }) { card ->
                         ProviderCard(
                             card = card,
@@ -213,12 +291,34 @@ fun ProvidersScreen(
                             },
                             onFetchModels = { viewModel.fetchModels(card.metadata.id) },
                             onToggleManualMode = { viewModel.toggleManualModelEntry(card.metadata.id) },
-                            onTestConnection = { viewModel.testConnection(card.metadata.id) }
+                            onTestConnection = { viewModel.testConnection(card.metadata.id) },
+                            onDeleteCustom = { viewModel.deleteCustomProvider(card.metadata.id) }
                         )
                     }
                 }
             }
         }
+    }
+
+    if (showAddCustomDialog) {
+        AddCustomProviderDialog(
+            initialSearchQuery = state.apiDiscoveryQuery,
+            discoveryResults = state.apiDiscoveryResults,
+            isSearching = state.isSearchingApiUrl,
+            onSearchApiUrl = viewModel::findApiEndpoint,
+            onAddProvider = { name, baseUrl, apiKey, defaultModel, docsUrl, requiresKey ->
+                viewModel.addCustomProvider(
+                    name = name,
+                    baseUrl = baseUrl,
+                    apiKey = apiKey,
+                    defaultModel = defaultModel,
+                    docsUrl = docsUrl,
+                    requiresApiKey = requiresKey
+                )
+                showAddCustomDialog = false
+            },
+            onDismiss = { showAddCustomDialog = false }
+        )
     }
 }
 
@@ -235,7 +335,8 @@ private fun ProviderCard(
     onModelSelected: (String) -> Unit,
     onFetchModels: () -> Unit,
     onToggleManualMode: () -> Unit,
-    onTestConnection: () -> Unit
+    onTestConnection: () -> Unit,
+    onDeleteCustom: () -> Unit
 ) {
     val context = LocalContext.current
     var showApiKey by remember { mutableStateOf(false) }
@@ -628,9 +729,22 @@ private fun ProviderCard(
                         if (!card.config.enabled) {
                             Button(
                                 onClick = { onToggleEnabled(true) },
-                                shape = RoundedCornerShape(12.dp)
+                                shape = RoundedCornerShape(8.dp)
                             ) {
                                 Text("Enable")
+                            }
+                        }
+
+                        if (card.isUserCreatedCustom) {
+                            IconButton(
+                                onClick = onDeleteCustom,
+                                modifier = Modifier.testTag("provider_delete_${card.metadata.id}")
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Delete,
+                                    contentDescription = "Delete custom provider",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
                             }
                         }
                     }
@@ -711,3 +825,236 @@ private fun CategoryBadge(category: ProviderCategory) {
         )
     }
 }
+
+@Composable
+private fun AddCustomProviderDialog(
+    initialSearchQuery: String,
+    discoveryResults: List<ProviderApiDiscoveryResult>,
+    isSearching: Boolean,
+    onSearchApiUrl: (String) -> Unit,
+    onAddProvider: (
+        name: String,
+        baseUrl: String,
+        apiKey: String,
+        defaultModel: String,
+        docsUrl: String?,
+        requiresApiKey: Boolean
+    ) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var searchInput by remember { mutableStateOf(initialSearchQuery) }
+    var name by remember { mutableStateOf("") }
+    var baseUrl by remember { mutableStateOf("") }
+    var docsUrl by remember { mutableStateOf("") }
+    var apiKey by remember { mutableStateOf("") }
+    var defaultModel by remember { mutableStateOf("") }
+    var requiresKey by remember { mutableStateOf(true) }
+    var showKey by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Rounded.Public, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text("Add Custom Provider")
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "1. Find the API URL you want to add (searches curated & live web endpoints):",
+                    style = MaterialTheme.typography.labelLarge
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = searchInput,
+                        onValueChange = { searchInput = it },
+                        placeholder = { Text("e.g. cerebras, chutes, deepinfra") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("custom_provider_find_input")
+                    )
+                    Button(
+                        onClick = { onSearchApiUrl(searchInput) },
+                        enabled = !isSearching,
+                        modifier = Modifier.testTag("custom_provider_find_button")
+                    ) {
+                        if (isSearching) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("Find")
+                        }
+                    }
+                }
+
+                if (discoveryResults.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        discoveryResults.take(4).forEach { hit ->
+                            Surface(
+                                onClick = {
+                                    if (name.isBlank()) name = hit.name
+                                    baseUrl = hit.baseUrl
+                                    docsUrl = hit.docsUrl.orEmpty()
+                                },
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (baseUrl.equals(hit.baseUrl, ignoreCase = true)) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.outlineVariant
+                                    }
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Link,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = hit.name,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = hit.baseUrl,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontFamily = JetBrainsMonoFamily,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    hit.docsUrl?.let { dUrl ->
+                                        IconButton(
+                                            onClick = {
+                                                runCatching {
+                                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dUrl)))
+                                                }
+                                            },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.AutoMirrored.Rounded.OpenInNew,
+                                                contentDescription = "Open API docs",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                Text(
+                    text = "2. Enter URL, Provider Name & API Key:",
+                    style = MaterialTheme.typography.labelLarge
+                )
+
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Provider Name") },
+                    placeholder = { Text("e.g. Cerebras AI") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("custom_provider_name_input")
+                )
+
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    label = { Text("API Base URL") },
+                    placeholder = { Text("https://api.example.com/v1") },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = JetBrainsMonoFamily),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("custom_provider_url_input")
+                )
+
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text(if (requiresKey) "API Key" else "API Key (Optional)") },
+                    placeholder = { Text("sk-... (stored encrypted)") },
+                    singleLine = true,
+                    visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { showKey = !showKey }) {
+                            Icon(
+                                if (showKey) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                contentDescription = if (showKey) "Hide key" else "Show key"
+                            )
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("custom_provider_key_input")
+                )
+
+                OutlinedTextField(
+                    value = defaultModel,
+                    onValueChange = { defaultModel = it },
+                    label = { Text("Default Model ID (Optional — auto-fetches /models)") },
+                    placeholder = { Text("e.g. llama-3.3-70b") },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = JetBrainsMonoFamily),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Requires API Key header", style = MaterialTheme.typography.bodySmall)
+                    Switch(checked = requiresKey, onCheckedChange = { requiresKey = it })
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onAddProvider(name, baseUrl, apiKey, defaultModel, docsUrl.ifBlank { null }, requiresKey)
+                },
+                enabled = baseUrl.isNotBlank() && (!requiresKey || apiKey.isNotBlank()),
+                modifier = Modifier.testTag("custom_provider_save_button")
+            ) {
+                Text("Add Provider")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+

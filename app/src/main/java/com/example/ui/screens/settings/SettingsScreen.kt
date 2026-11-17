@@ -20,24 +20,32 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Logout
+import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Save
+import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -55,14 +63,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.BuildConfig
 import com.example.R
+import com.example.data.remote.CloudVaultSyncStatus
 import com.example.domain.model.ThemeMode
 import com.example.ui.theme.BrandWordmarkStyle
 import com.example.ui.theme.JetBrainsMonoFamily
@@ -73,9 +84,11 @@ fun SettingsScreen(
     viewModel: SettingsViewModel,
     onOpenProviders: () -> Unit,
     onOpenMcpServers: () -> Unit,
-    onOpenGitHub: () -> Unit = {}
+    onOpenGitHub: () -> Unit = {},
+    onOpenSidebar: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     var promptDraft by remember(state.settings.systemPrompt) {
         mutableStateOf(state.settings.systemPrompt)
     }
@@ -98,7 +111,17 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings", style = MaterialTheme.typography.titleLarge) }
+                title = { Text("Settings & Account Sync", style = MaterialTheme.typography.titleLarge) },
+                navigationIcon = {
+                    if (onOpenSidebar != null) {
+                        IconButton(
+                            onClick = onOpenSidebar,
+                            modifier = Modifier.testTag("settings_menu_button")
+                        ) {
+                            Icon(Icons.Rounded.Menu, contentDescription = "Open navigation sidebar")
+                        }
+                    }
+                }
             )
         }
     ) { innerPadding ->
@@ -130,42 +153,120 @@ fun SettingsScreen(
                             Text(
                                 text = banner,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.weight(1f)
                             )
                             TextButton(onClick = viewModel::clearBanner) { Text("OK") }
                         }
                     }
                 }
 
-                // IB CODER Identity Hero Card
+                // Signed-In Account & Cross-Device Cloud Vault Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
+                    shape = RoundedCornerShape(10.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Image(
-                            painter = painterResource(R.drawable.ib_coder_logo),
-                            contentDescription = "IB CODER badge",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("IB CODER", style = BrandWordmarkStyle)
-                            Text(
-                                text = "v${BuildConfig.VERSION_NAME} • On-Device AI IDE",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(R.drawable.ib_coder_logo),
+                                contentDescription = "IB CODER badge",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(8.dp))
                             )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = state.accountSession.displayName.ifBlank { "IB CODER Account" },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = state.accountSession.username.ifBlank { "Google Account • Cross-Device Sync" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Icon(
+                                Icons.Rounded.AccountCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        when (val sync = state.cloudSyncStatus) {
+                            is CloudVaultSyncStatus.Syncing -> {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Text(sync.detail, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                            is CloudVaultSyncStatus.Synced -> {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.CloudDone,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Synced to your account: ${sync.syncedKeysCount} API key(s), ${sync.customProvidersCount} custom provider(s), ${sync.mcpCount} MCP server(s)" +
+                                            if (sync.hasGitHubToken) ", GitHub token" else "",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            is CloudVaultSyncStatus.Error -> {
+                                Text(
+                                    text = sync.message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                            CloudVaultSyncStatus.SignedOut -> {
+                                Text(
+                                    text = "Sign in on any device with the same Google account to restore keys and tokens.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { viewModel.syncAccountVaultNow() },
+                                enabled = state.cloudSyncStatus !is CloudVaultSyncStatus.Syncing,
+                                modifier = Modifier.testTag("settings_cloud_sync_now_button")
+                            ) {
+                                Icon(Icons.Rounded.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Sync Now")
+                            }
+                            OutlinedButton(
+                                onClick = { viewModel.signOutAccount(context) },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                modifier = Modifier.testTag("settings_sign_out_button")
+                            ) {
+                                Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Sign Out")
+                            }
                         }
                     }
                 }
@@ -173,7 +274,7 @@ fun SettingsScreen(
                 // Providers & API Keys Entry Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(8.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {
@@ -190,9 +291,9 @@ fun SettingsScreen(
                         )
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("AI Providers & API Keys", style = MaterialTheme.typography.titleMedium)
+                            Text("AI Providers & Custom APIs", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "Configure keys, base URLs, live /models, and test connections",
+                                "Find API URLs, add your own custom providers, manage keys, & fetch /models",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

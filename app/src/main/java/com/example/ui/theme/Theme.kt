@@ -12,31 +12,31 @@ import androidx.compose.ui.unit.dp
 import com.example.domain.model.ThemeMode
 
 private val IbCoderDarkColorScheme = darkColorScheme(
-    primary = TitaniumPrimaryDark,
-    onPrimary = TitaniumOnPrimaryDark,
-    primaryContainer = TitaniumContainerDark,
-    onPrimaryContainer = TitaniumOnContainerDark,
-    secondary = SteelSecondaryDark,
-    onSecondary = SteelOnSecondaryDark,
-    secondaryContainer = SteelContainerDark,
-    onSecondaryContainer = SteelOnContainerDark,
-    tertiary = PhosphorTertiaryDark,
-    onTertiary = PhosphorOnTertiaryDark,
-    tertiaryContainer = PhosphorContainerDark,
-    onTertiaryContainer = PhosphorOnContainerDark,
-    background = CharcoalBg,
-    onBackground = CharcoalOnBg,
-    surface = CharcoalSurface,
-    onSurface = CharcoalOnBg,
-    surfaceVariant = CharcoalSurfaceContainer,
-    onSurfaceVariant = CharcoalOnSurfaceVar,
-    surfaceContainerLowest = CharcoalSurfaceLowest,
-    surfaceContainerLow = CharcoalSurface,
-    surfaceContainer = CharcoalSurfaceContainer,
-    surfaceContainerHigh = CharcoalSurfaceHigh,
-    surfaceContainerHighest = CharcoalSurfaceHighest,
-    outline = CharcoalOutline,
-    outlineVariant = CharcoalOutlineVariant,
+    primary = IdeCyanPrimaryDark,
+    onPrimary = IdeOnCyanPrimaryDark,
+    primaryContainer = IdeCyanContainerDark,
+    onPrimaryContainer = IdeOnCyanContainerDark,
+    secondary = IdeSteelSecondaryDark,
+    onSecondary = IdeOnSteelSecondaryDark,
+    secondaryContainer = IdeSteelContainerDark,
+    onSecondaryContainer = IdeOnSteelContainerDark,
+    tertiary = IdeMintTertiaryDark,
+    onTertiary = IdeOnMintTertiaryDark,
+    tertiaryContainer = IdeMintContainerDark,
+    onTertiaryContainer = IdeOnMintContainerDark,
+    background = IdeBgDark,
+    onBackground = IdeTextPrimaryDark,
+    surface = IdePanelBgDark,
+    onSurface = IdeTextPrimaryDark,
+    surfaceVariant = IdeSurfaceContainerDark,
+    onSurfaceVariant = IdeTextMutedDark,
+    surfaceContainerLowest = IdeEditorBgDark,
+    surfaceContainerLow = IdePanelBgDark,
+    surfaceContainer = IdeSurfaceContainerDark,
+    surfaceContainerHigh = IdeChromeHighDark,
+    surfaceContainerHighest = IdeSurfaceHighestDark,
+    outline = IdeOutlineDark,
+    outlineVariant = IdeOutlineSubtleDark,
     error = ErrorDark,
     onError = ErrorOnDark,
     errorContainer = ErrorContainerDark,
@@ -44,10 +44,10 @@ private val IbCoderDarkColorScheme = darkColorScheme(
 )
 
 private val IbCoderLightColorScheme = lightColorScheme(
-    primary = ObsidianPrimaryLight,
-    onPrimary = ObsidianOnPrimaryLight,
-    primaryContainer = ObsidianContainerLight,
-    onPrimaryContainer = ObsidianOnContainerLight,
+    primary = IdeBluePrimaryLight,
+    onPrimary = IdeOnBluePrimaryLight,
+    primaryContainer = IdeBlueContainerLight,
+    onPrimaryContainer = IdeOnBlueContainerLight,
     secondary = GunmetalSecondaryLight,
     onSecondary = Color.White,
     secondaryContainer = GunmetalContainerLight,
@@ -75,12 +75,13 @@ private val IbCoderLightColorScheme = lightColorScheme(
     onErrorContainer = OnErrorContainerLight
 )
 
+// Crisp, technical IDE geometry matching the reference interface
 val IbCoderShapes = Shapes(
-    extraSmall = RoundedCornerShape(6.dp),
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(14.dp),
-    large = RoundedCornerShape(18.dp),
-    extraLarge = RoundedCornerShape(24.dp)
+    extraSmall = RoundedCornerShape(3.dp),
+    small = RoundedCornerShape(4.dp),
+    medium = RoundedCornerShape(6.dp),
+    large = RoundedCornerShape(8.dp),
+    extraLarge = RoundedCornerShape(12.dp)
 )
 
 @Composable

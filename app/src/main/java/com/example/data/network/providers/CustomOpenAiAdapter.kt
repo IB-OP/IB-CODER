@@ -8,9 +8,8 @@ import okhttp3.OkHttpClient
 
 class CustomOpenAiAdapter(
     okHttpClient: OkHttpClient,
-    json: Json
-) : OpenAiCompatibleAdapter(okHttpClient, json) {
-    override val metadata = ProviderMetadata(
+    json: Json,
+    override val metadata: ProviderMetadata = ProviderMetadata(
         id = "custom_openai",
         displayName = "Custom OpenAI-Compatible",
         category = ProviderCategory.CUSTOM,
@@ -18,4 +17,4 @@ class CustomOpenAiAdapter(
         description = "Any custom vLLM, LiteLLM, LM Studio, or OpenAI-compatible server.",
         requiresApiKey = false
     )
-}
+) : OpenAiCompatibleAdapter(okHttpClient, json)

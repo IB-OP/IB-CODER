@@ -309,6 +309,15 @@ class GitHubPushClient(
                 .build()
 
             okHttpClient.newCall(req).execute().use { resp ->
+                if (resp.code == 409) {
+                    // Empty Git repository with no commits yet
+                    return@runCatching if (!existingProjectId.isNullOrBlank()) {
+                        workspaceManager.getProject(existingProjectId)
+                            ?: workspaceManager.createProject(repo)
+                    } else {
+                        workspaceManager.createProject(repo)
+                    }
+                }
                 if (!resp.isSuccessful) {
                     val errBody = resp.body?.string().orEmpty()
                     error(formatGitHubError(resp.code, errBody))
@@ -568,17 +577,15 @@ class GitHubPushClient(
                 .ifBlank { error("Could not resolve authenticated GitHub user.") }
             val owner = ownerInput.trim().ifBlank { authedLogin }
 
-            val project = workspaceManager.getProject(projectId)
+            workspaceManager.getProject(projectId)
                 ?: error("Active workspace project not found.")
-            val rootDir = File(project.rootPath)
-            if (!rootDir.exists()) error("Workspace directory does not exist.")
 
             // Optionally stage GitHub Actions APK build workflow into the workspace
             var workflowAdded = false
             if (includeApkWorkflow) {
-                val buildApkYml = File(rootDir, ".github/workflows/build-apk.yml")
-                val existingAndroidYml = File(rootDir, ".github/workflows/android.yml")
-                if (!buildApkYml.exists() && !existingAndroidYml.exists()) {
+                val buildApkStat = workspaceManager.statPath(projectId, ".github/workflows/build-apk.yml")
+                val androidStat = workspaceManager.statPath(projectId, ".github/workflows/android.yml")
+                if (!buildApkStat.exists && !androidStat.exists) {
                     workspaceManager.writeFile(
                         projectId,
                         ".github/workflows/build-apk.yml",
@@ -666,12 +673,11 @@ class GitHubPushClient(
                 branchExists = true
             }
 
-            val rootUri = rootDir.toURI()
-            val filesToUpload = rootDir.walkTopDown()
-                .onEnter { dir -> dir == rootDir || dir.name !in IGNORED_DIRS }
-                .filter { it.isFile }
-                .sortedBy { it.absolutePath }
-                .toList()
+            val filesToUpload = workspaceManager.collectProjectFilesForSync(
+                projectId = projectId,
+                ignoredDirs = IGNORED_DIRS,
+                maxBlobBytes = MAX_BLOB_BYTES
+            )
 
             if (filesToUpload.isEmpty()) {
                 error("Workspace has no files to push.")
@@ -679,17 +685,11 @@ class GitHubPushClient(
 
             val total = filesToUpload.size
             val treeEntries = buildJsonArray {
-                filesToUpload.forEachIndexed { index, file ->
-                    val relPath = rootUri.relativize(file.toURI()).path
-                        .replace('\\', '/')
-                        .trimStart('/')
+                filesToUpload.forEachIndexed { index, entry ->
+                    val relPath = entry.relativePath.replace('\\', '/').trimStart('/')
                     if (relPath.isNotBlank()) {
                         onProgress("Uploading files (${index + 1}/$total): $relPath")
-                        val bytes = file.readBytes()
-                        if (bytes.size > MAX_BLOB_BYTES) {
-                            error("File '$relPath' exceeds 20 MB GitHub API upload limit.")
-                        }
-                        val b64 = Base64.getEncoder().encodeToString(bytes)
+                        val b64 = Base64.getEncoder().encodeToString(entry.bytes)
                         val blobPayload = buildJsonObject {
                             put("content", b64)
                             put("encoding", "base64")
@@ -701,7 +701,7 @@ class GitHubPushClient(
                         )
                         val blobSha = blobResp["sha"]?.jsonPrimitive?.content
                             ?: error("GitHub did not return blob SHA for '$relPath'.")
-                        val mode = if (file.name == "gradlew" || file.name.endsWith(".sh")) "100755" else "100644"
+                        val mode = if (entry.isExecutable) "100755" else "100644"
                         add(
                             buildJsonObject {
                                 put("path", relPath)

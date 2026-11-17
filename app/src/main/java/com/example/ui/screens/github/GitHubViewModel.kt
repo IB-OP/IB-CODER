@@ -522,6 +522,7 @@ class GitHubViewModel(
         branch: String,
         enableAutoSync: Boolean,
         enableAutoFix: Boolean,
+        directGitHubMode: Boolean = true,
         onOpenWorkspace: () -> Unit = {}
     ) {
         val token = savedTokenState.value
@@ -538,13 +539,18 @@ class GitHubViewModel(
                             repo = repo.name,
                             branch = branch,
                             isPrivate = repo.isPrivate,
-                            autoSyncEnabled = enableAutoSync,
+                            autoSyncEnabled = enableAutoSync || directGitHubMode,
                             autoFixWorkflowBugs = enableAutoFix,
+                            directGitHubMode = directGitHubMode,
                             lastRepoUrl = repo.htmlUrl,
                             lastActionsUrl = "${repo.htmlUrl}/actions"
                         )
                     )
-                    bannerState.value = "Cloned ${repo.fullName} ($branch) into Workspace."
+                    bannerState.value = if (directGitHubMode) {
+                        "Opened ${repo.fullName} ($branch) directly from GitHub."
+                    } else {
+                        "Cloned ${repo.fullName} ($branch) into Workspace."
+                    }
                     onOpenWorkspace()
                 },
                 onFailure = { err ->
@@ -604,6 +610,12 @@ class GitHubViewModel(
         viewModelScope.launch {
             val cur = settingsDataStore.getGitHubProjectConfig(projectId) ?: return@launch
             settingsDataStore.saveGitHubProjectConfig(projectId, cur.copy(autoSyncEnabled = enabled))
+        }
+    }
+
+    fun toggleProjectDirectMode(projectId: String, enabled: Boolean) {
+        viewModelScope.launch {
+            gitHubSyncManager.setDirectGitHubMode(projectId, enabled)
         }
     }
 

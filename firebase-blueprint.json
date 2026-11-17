@@ -1,0 +1,136 @@
+{
+  "entities": {
+    "UserAccountVault": {
+      "title": "User Account Vault",
+      "description": "Cross-device account profile, app preferences, and encrypted-at-rest GitHub credentials linked to a Firebase user.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID matching the document ID" },
+        "email": { "type": "string", "description": "Google account email" },
+        "displayName": { "type": "string", "description": "Account display name" },
+        "photoUrl": { "type": "string", "description": "Profile photo URL" },
+        "themeMode": { "type": "string", "description": "Theme preference: DARK, LIGHT, or SYSTEM" },
+        "defaultProviderId": { "type": "string", "description": "Selected default AI provider ID" },
+        "defaultModelId": { "type": "string", "description": "Selected default model ID" },
+        "systemPrompt": { "type": "string", "description": "Custom default agent system prompt" },
+        "githubToken": { "type": "string", "description": "Synced GitHub personal access token" },
+        "githubDefaultOwner": { "type": "string", "description": "Default GitHub owner or username" },
+        "githubUserProfileJson": { "type": "string", "description": "Serialized GitHubUserProfile JSON" },
+        "updatedAt": { "type": "integer", "description": "Epoch milliseconds timestamp of last update" }
+      },
+      "required": ["uid", "email", "displayName", "updatedAt"]
+    },
+    "ProviderVaultEntry": {
+      "title": "Provider Vault Entry",
+      "description": "Per-provider API key and configuration synced to the user's account.",
+      "type": "object",
+      "properties": {
+        "providerId": { "type": "string", "description": "Provider identifier matching document ID" },
+        "apiKey": { "type": "string", "description": "User API key for this provider" },
+        "baseUrl": { "type": "string", "description": "Base API endpoint URL" },
+        "selectedModel": { "type": "string", "description": "Preferred model identifier" },
+        "enabled": { "type": "boolean", "description": "Whether this provider is enabled" },
+        "accountId": { "type": "string", "description": "Optional Cloudflare account ID" },
+        "deploymentName": { "type": "string", "description": "Optional Azure deployment name" },
+        "fetchedModels": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Cached fetched model IDs"
+        },
+        "updatedAt": { "type": "integer", "description": "Epoch milliseconds timestamp" }
+      },
+      "required": ["providerId", "updatedAt"]
+    },
+    "CustomProviderEntry": {
+      "title": "Custom Provider Definition",
+      "description": "User-created OpenAI-compatible AI provider definition.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Custom provider ID matching document ID" },
+        "displayName": { "type": "string", "description": "Human-readable name" },
+        "defaultBaseUrl": { "type": "string", "description": "Endpoint base URL" },
+        "signupUrl": { "type": "string", "description": "Optional documentation or key URL" },
+        "defaultModel": { "type": "string", "description": "Default model ID" },
+        "requiresApiKey": { "type": "boolean", "description": "Whether Bearer auth is required" },
+        "description": { "type": "string", "description": "Provider description" },
+        "updatedAt": { "type": "integer", "description": "Epoch milliseconds timestamp" }
+      },
+      "required": ["id", "displayName", "defaultBaseUrl", "updatedAt"]
+    },
+    "McpServerVaultEntry": {
+      "title": "MCP Server Vault Entry",
+      "description": "Saved MCP server configuration and auth token linked to user's account.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Server ID matching document ID" },
+        "name": { "type": "string", "description": "Server name" },
+        "endpointUrl": { "type": "string", "description": "HTTP or SSE endpoint URL" },
+        "transport": { "type": "string", "description": "Transport mode enum name" },
+        "authHeaderName": { "type": "string", "description": "Auth header name" },
+        "enabled": { "type": "boolean", "description": "Whether server tools are enabled" },
+        "authToken": { "type": "string", "description": "Bearer or header token" },
+        "updatedAt": { "type": "integer", "description": "Epoch milliseconds timestamp" }
+      },
+      "required": ["id", "name", "endpointUrl", "updatedAt"]
+    },
+    "GitHubProjectVaultEntry": {
+      "title": "GitHub Project Config",
+      "description": "Linked GitHub repository and branch sync configuration per workspace.",
+      "type": "object",
+      "properties": {
+        "projectId": { "type": "string", "description": "Workspace project ID matching document ID" },
+        "owner": { "type": "string", "description": "Repository owner" },
+        "repo": { "type": "string", "description": "Repository name" },
+        "branch": { "type": "string", "description": "Target branch name" },
+        "isPrivate": { "type": "boolean", "description": "Private repository flag" },
+        "createIfMissing": { "type": "boolean", "description": "Auto-create missing repo" },
+        "includeApkWorkflow": { "type": "boolean", "description": "Include Android APK/AAB workflow" },
+        "autoSyncEnabled": { "type": "boolean", "description": "Auto-sync edits to GitHub" },
+        "autoFixWorkflowBugs": { "type": "boolean", "description": "Offer AI auto-fix on failed workflow" },
+        "directGitHubMode": { "type": "boolean", "description": "Commit changes directly to GitHub" },
+        "updatedAt": { "type": "integer", "description": "Epoch milliseconds timestamp" }
+      },
+      "required": ["projectId", "owner", "repo", "updatedAt"]
+    },
+    "SessionConfigVaultEntry": {
+      "title": "Session Prompt Config",
+      "description": "Session mode and custom system prompt synced per session ID.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "description": "Session ID matching document ID" },
+        "mode": { "type": "string", "description": "NORMAL or SPECIAL" },
+        "presetId": { "type": "string", "description": "Optional preset identifier" },
+        "presetTitle": { "type": "string", "description": "Optional preset display title" },
+        "systemPrompt": { "type": "string", "description": "System prompt instructions" },
+        "updatedAt": { "type": "integer", "description": "Epoch milliseconds timestamp" }
+      },
+      "required": ["sessionId", "mode", "systemPrompt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccountVault" },
+      "description": "Authenticated user's root account vault containing profile, global settings, and GitHub token."
+    },
+    "/users/{userId}/providerKeys/{providerId}": {
+      "schema": { "$ref": "#/entities/ProviderVaultEntry" },
+      "description": "Per-provider API key and configuration for cross-device restore."
+    },
+    "/users/{userId}/customProviders/{providerId}": {
+      "schema": { "$ref": "#/entities/CustomProviderEntry" },
+      "description": "User-created custom AI provider endpoints."
+    },
+    "/users/{userId}/mcpServers/{serverId}": {
+      "schema": { "$ref": "#/entities/McpServerVaultEntry" },
+      "description": "User's MCP server endpoints and auth tokens."
+    },
+    "/users/{userId}/githubProjects/{projectId}": {
+      "schema": { "$ref": "#/entities/GitHubProjectVaultEntry" },
+      "description": "GitHub repository link settings for each project."
+    },
+    "/users/{userId}/sessionConfigs/{sessionId}": {
+      "schema": { "$ref": "#/entities/SessionConfigVaultEntry" },
+      "description": "Per-session mode and system prompt configuration."
+    }
+  }
+}

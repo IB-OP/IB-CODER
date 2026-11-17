@@ -14,6 +14,7 @@ import com.example.data.workspace.WorkspaceManager
 import com.example.domain.model.FileNode
 import com.example.domain.model.GitHubProjectConfig
 import com.example.domain.model.GitHubPushResult
+import com.example.domain.model.GitHubRepositorySummary
 import com.example.domain.model.GitHubSyncStatus
 import com.example.domain.model.GitHubUserProfile
 import com.example.domain.model.GitHubWorkflowRunSummary
@@ -42,14 +43,19 @@ data class WorkspaceUiState(
     val projects: List<WorkspaceProject> = emptyList(),
     val activeProject: WorkspaceProject? = null,
     val fileTree: List<FileNode> = emptyList(),
+    val openTabs: List<String> = emptyList(),
     val selectedFilePath: String? = null,
     val selectedFileContent: String = "",
     val isEditingFile: Boolean = false,
+    val sidebarSearchQuery: String = "",
+    val sidebarSearchResult: String = "",
     val statusMessage: String? = null,
     val errorMessage: String? = null,
     val isBusy: Boolean = false,
     val savedGitHubToken: String = "",
     val defaultGitHubOwner: String = "",
+    val availableGitHubRepos: List<GitHubRepositorySummary> = emptyList(),
+    val isLoadingGitHubRepos: Boolean = false,
     val activeProjectGitHubConfig: GitHubProjectConfig? = null,
     val activeProjectSyncStatus: GitHubSyncStatus = GitHubSyncStatus.Idle,
     val gitHubVerifyState: GitHubVerifyUiState = GitHubVerifyUiState.Idle,
@@ -67,14 +73,19 @@ class WorkspaceViewModel(
 ) : ViewModel() {
 
     private val fileTreeState = MutableStateFlow<List<FileNode>>(emptyList())
+    private val openTabsState = MutableStateFlow<List<String>>(emptyList())
     private val selectedFilePathState = MutableStateFlow<String?>(null)
     private val selectedFileContentState = MutableStateFlow("")
     private val isEditingState = MutableStateFlow(false)
+    private val sidebarSearchQueryState = MutableStateFlow("")
+    private val sidebarSearchResultState = MutableStateFlow("")
     private val statusState = MutableStateFlow<String?>(null)
     private val errorState = MutableStateFlow<String?>(null)
     private val busyState = MutableStateFlow(false)
 
     private val savedGitHubTokenState = MutableStateFlow("")
+    private val availableGitHubReposState = MutableStateFlow<List<GitHubRepositorySummary>>(emptyList())
+    private val isLoadingGitHubReposState = MutableStateFlow(false)
     private val gitHubVerifyState = MutableStateFlow<GitHubVerifyUiState>(GitHubVerifyUiState.Idle)
     private val gitHubPushState = MutableStateFlow<GitHubPushUiState>(GitHubPushUiState.Idle)
     private val latestWorkflowRunState = MutableStateFlow<GitHubWorkflowRunSummary?>(null)
@@ -89,7 +100,11 @@ class WorkspaceViewModel(
     init {
         viewModelScope.launch {
             settingsDataStore.hasGitHubTokenFlow.collect {
-                savedGitHubTokenState.value = settingsDataStore.getGitHubToken()
+                val tok = settingsDataStore.getGitHubToken()
+                savedGitHubTokenState.value = tok
+                if (tok.isBlank()) {
+                    availableGitHubReposState.value = emptyList()
+                }
             }
         }
 
@@ -108,6 +123,10 @@ class WorkspaceViewModel(
                 if (active?.id != lastLoadedProjectId) {
                     lastLoadedProjectId = active?.id
                     refreshTreeInternal(active?.id)
+                    openTabsState.value = emptyList()
+                    selectedFilePathState.value = null
+                    selectedFileContentState.value = ""
+                    sidebarSearchResultState.value = ""
                     gitHubPushState.value = GitHubPushUiState.Idle
                     latestWorkflowRunState.value = null
                     workflowCheckErrorState.value = null
@@ -118,10 +137,15 @@ class WorkspaceViewModel(
                 isEditingState,
                 statusState,
                 errorState,
-                busyState
-            ) { editing, status, err, busy ->
-                FlagsState(editing, status, err, busy)
+                busyState,
+                openTabsState
+            ) { editing, status, err, busy, tabs ->
+                FlagsState(editing, status, err, busy, tabs)
             }
+            val searchPairFlow = combine(
+                sidebarSearchQueryState,
+                sidebarSearchResultState
+            ) { q, res -> q to res }
             val gitHubConfigFlow = combine(
                 savedGitHubTokenState,
                 settingsDataStore.githubDefaultOwnerFlow,
@@ -131,28 +155,40 @@ class WorkspaceViewModel(
             ) { token, defOwner, configs, verify, push ->
                 GitHubConfigBundle(token, defOwner, configs, verify, push)
             }
+            val repoCatalogFlow = combine(
+                availableGitHubReposState,
+                isLoadingGitHubReposState
+            ) { repos, loading ->
+                repos to loading
+            }
             val workflowRunFlow = combine(
                 latestWorkflowRunState,
                 checkingWorkflowRunState,
                 workflowCheckErrorState,
-                gitHubSyncManager.syncStatuses
-            ) { run, checking, err, syncMap ->
-                WorkflowRunBundle(run, checking, err, syncMap)
+                gitHubSyncManager.syncStatuses,
+                repoCatalogFlow
+            ) { run, checking, err, syncMap, repoCatalog ->
+                WorkflowRunBundle(run, checking, err, syncMap, repoCatalog.first, repoCatalog.second)
             }
 
-            combine(partialFlow, flagsFlow, gitHubConfigFlow, workflowRunFlow) { p, f, gh, wf ->
+            combine(partialFlow, flagsFlow, gitHubConfigFlow, workflowRunFlow, searchPairFlow) { p, f, gh, wf, searchPair ->
                 WorkspaceUiState(
                     projects = p.projects,
                     activeProject = p.active,
                     fileTree = p.tree,
+                    openTabs = f.tabs,
                     selectedFilePath = p.filePath,
                     selectedFileContent = p.fileContent,
                     isEditingFile = f.editing,
+                    sidebarSearchQuery = searchPair.first,
+                    sidebarSearchResult = searchPair.second,
                     statusMessage = f.status,
                     errorMessage = f.err,
                     isBusy = f.busy,
                     savedGitHubToken = gh.token,
                     defaultGitHubOwner = gh.defaultOwner,
+                    availableGitHubRepos = wf.availableRepos,
+                    isLoadingGitHubRepos = wf.isLoadingRepos,
                     activeProjectGitHubConfig = p.active?.let { gh.configs[it.id] },
                     activeProjectSyncStatus = p.active?.let { wf.syncMap[it.id] } ?: GitHubSyncStatus.Idle,
                     gitHubVerifyState = gh.verify,
@@ -186,8 +222,10 @@ class WorkspaceViewModel(
     fun selectProject(projectId: String) {
         viewModelScope.launch {
             settingsDataStore.setActiveProjectId(projectId)
+            openTabsState.value = emptyList()
             selectedFilePathState.value = null
             selectedFileContentState.value = ""
+            sidebarSearchResultState.value = ""
             isEditingState.value = false
             refreshTreeInternal(projectId)
         }
@@ -203,6 +241,70 @@ class WorkspaceViewModel(
                 statusState.value = "Created project '${created.name}'."
             }.onFailure {
                 errorState.value = it.message ?: "Could not create project."
+            }
+            busyState.value = false
+        }
+    }
+
+    fun createProjectFromDeviceFolder(treeUri: Uri) {
+        viewModelScope.launch {
+            busyState.value = true
+            runCatching {
+                val attached = workspaceManager.attachDeviceFolderProject(treeUri)
+                settingsDataStore.setActiveProjectId(attached.id)
+                selectedFilePathState.value = null
+                selectedFileContentState.value = ""
+                isEditingState.value = false
+                refreshTreeInternal(attached.id)
+                statusState.value = "Opened device folder '${attached.name}' as active project."
+            }.onFailure {
+                errorState.value = it.message ?: "Could not open selected device folder."
+            }
+            busyState.value = false
+        }
+    }
+
+    fun loadGitHubRepositories() {
+        if (savedGitHubTokenState.value.isBlank() || isLoadingGitHubReposState.value) return
+        viewModelScope.launch {
+            isLoadingGitHubReposState.value = true
+            gitHubSyncManager.listRepositories().onSuccess { repos ->
+                availableGitHubReposState.value = repos
+            }.onFailure { err ->
+                errorState.value = err.message ?: "Could not load GitHub repositories."
+            }
+            isLoadingGitHubReposState.value = false
+        }
+    }
+
+    fun createDirectGitHubProject(
+        owner: String,
+        repo: String,
+        branch: String,
+        isPrivate: Boolean,
+        createNewRepo: Boolean,
+        includeWorkflow: Boolean,
+        autoFixWorkflowBugs: Boolean
+    ) {
+        viewModelScope.launch {
+            busyState.value = true
+            gitHubSyncManager.createDirectGitHubProject(
+                workspaceManager = workspaceManager,
+                ownerInput = owner,
+                repoInput = repo,
+                branchInput = branch,
+                isPrivate = isPrivate,
+                createNewRepo = createNewRepo,
+                includeApkWorkflow = includeWorkflow,
+                autoFixWorkflowBugs = autoFixWorkflowBugs
+            ).onSuccess { project ->
+                selectedFilePathState.value = null
+                selectedFileContentState.value = ""
+                isEditingState.value = false
+                refreshTreeInternal(project.id)
+                statusState.value = "Connected '${project.name}' directly to GitHub (${branch.ifBlank { "main" }})."
+            }.onFailure { err ->
+                errorState.value = err.message ?: "Could not open GitHub repository."
             }
             busyState.value = false
         }
@@ -228,7 +330,11 @@ class WorkspaceViewModel(
                 settingsDataStore.setActiveProjectId(null)
                 selectedFilePathState.value = null
                 selectedFileContentState.value = ""
-                statusState.value = "Deleted project '${project.name}'."
+                statusState.value = if (project.isDeviceFolder) {
+                    "Removed '${project.name}' from IB CODER (device folder kept)."
+                } else {
+                    "Deleted project '${project.name}'."
+                }
             }.onFailure {
                 errorState.value = it.message ?: "Failed to delete project."
             }
@@ -240,6 +346,9 @@ class WorkspaceViewModel(
         viewModelScope.launch {
             runCatching {
                 val text = workspaceManager.readRawFile(projectId, relativePath)
+                if (relativePath !in openTabsState.value) {
+                    openTabsState.value = openTabsState.value + relativePath
+                }
                 selectedFilePathState.value = relativePath
                 selectedFileContentState.value = text
                 isEditingState.value = false
@@ -249,10 +358,45 @@ class WorkspaceViewModel(
         }
     }
 
+    fun closeTab(relativePath: String) {
+        val remaining = openTabsState.value.filterNot { it == relativePath }
+        openTabsState.value = remaining
+        if (selectedFilePathState.value == relativePath) {
+            val next = remaining.lastOrNull()
+            if (next != null) {
+                openFile(next)
+            } else {
+                closeFileViewer()
+            }
+        }
+    }
+
     fun closeFileViewer() {
         selectedFilePathState.value = null
         selectedFileContentState.value = ""
         isEditingState.value = false
+    }
+
+    fun setSidebarSearchQuery(query: String) {
+        sidebarSearchQueryState.value = query
+    }
+
+    fun runSidebarSearch(query: String = sidebarSearchQueryState.value) {
+        val projectId = _uiState.value.activeProject?.id ?: return
+        val clean = query.trim()
+        if (clean.isEmpty()) {
+            sidebarSearchResultState.value = ""
+            return
+        }
+        viewModelScope.launch {
+            runCatching {
+                workspaceManager.searchFiles(projectId, clean)
+            }.onSuccess { res ->
+                sidebarSearchResultState.value = res
+            }.onFailure { err ->
+                sidebarSearchResultState.value = err.message ?: "Search failed."
+            }
+        }
     }
 
     fun setEditing(editing: Boolean) {
@@ -314,8 +458,10 @@ class WorkspaceViewModel(
         viewModelScope.launch {
             runCatching {
                 workspaceManager.deletePath(projectId, relativePath)
+                openTabsState.value = openTabsState.value.filterNot { it == relativePath }
                 if (selectedFilePathState.value == relativePath) {
-                    closeFileViewer()
+                    val next = openTabsState.value.lastOrNull()
+                    if (next != null) openFile(next) else closeFileViewer()
                 }
                 refreshTreeInternal(projectId)
                 statusState.value = "Deleted '$relativePath'."
@@ -393,7 +539,8 @@ class WorkspaceViewModel(
         createIfMissing: Boolean,
         includeApkWorkflow: Boolean,
         autoSyncEnabled: Boolean = false,
-        autoFixWorkflowBugs: Boolean = false
+        autoFixWorkflowBugs: Boolean = false,
+        directGitHubMode: Boolean = false
     ) {
         val project = _uiState.value.activeProject ?: return
         viewModelScope.launch {
@@ -430,8 +577,9 @@ class WorkspaceViewModel(
                             isPrivate = isPrivate,
                             createIfMissing = createIfMissing,
                             includeApkWorkflow = includeApkWorkflow,
-                            autoSyncEnabled = autoSyncEnabled,
+                            autoSyncEnabled = autoSyncEnabled || directGitHubMode,
                             autoFixWorkflowBugs = autoFixWorkflowBugs,
+                            directGitHubMode = directGitHubMode,
                             lastCommitSha = pushed.commitSha,
                             lastRepoUrl = pushed.repoUrl,
                             lastActionsUrl = pushed.actionsUrl,
@@ -460,6 +608,45 @@ class WorkspaceViewModel(
                     errorState.value = err.message ?: "Sync failed."
                 }
             )
+        }
+    }
+
+    fun pullFromGitHub() {
+        val projectId = _uiState.value.activeProject?.id ?: return
+        viewModelScope.launch {
+            busyState.value = true
+            gitHubSyncManager.pullFromGitHub(projectId).fold(
+                onSuccess = {
+                    refreshTreeInternal(projectId)
+                    val openPath = selectedFilePathState.value
+                    if (openPath != null) {
+                        val reloaded = runCatching { workspaceManager.readRawFile(projectId, openPath) }.getOrNull()
+                        if (reloaded != null) {
+                            selectedFileContentState.value = reloaded
+                        } else {
+                            closeFileViewer()
+                        }
+                    }
+                    val branch = _uiState.value.activeProjectGitHubConfig?.branch?.ifBlank { "main" } ?: "main"
+                    statusState.value = "Pulled latest files from GitHub '$branch'."
+                },
+                onFailure = { err ->
+                    errorState.value = err.message ?: "Pull from GitHub failed."
+                }
+            )
+            busyState.value = false
+        }
+    }
+
+    fun toggleDirectGitHubMode(enabled: Boolean) {
+        val projectId = _uiState.value.activeProject?.id ?: return
+        viewModelScope.launch {
+            gitHubSyncManager.setDirectGitHubMode(projectId, enabled)
+            statusState.value = if (enabled) {
+                "Direct GitHub mode enabled: edits commit immediately to main."
+            } else {
+                "Direct GitHub mode turned off."
+            }
         }
     }
 
@@ -511,7 +698,8 @@ class WorkspaceViewModel(
         val editing: Boolean,
         val status: String?,
         val err: String?,
-        val busy: Boolean
+        val busy: Boolean,
+        val tabs: List<String>
     )
 
     private data class GitHubConfigBundle(
@@ -526,7 +714,9 @@ class WorkspaceViewModel(
         val run: GitHubWorkflowRunSummary?,
         val checking: Boolean,
         val err: String?,
-        val syncMap: Map<String, GitHubSyncStatus>
+        val syncMap: Map<String, GitHubSyncStatus>,
+        val availableRepos: List<GitHubRepositorySummary>,
+        val isLoadingRepos: Boolean
     )
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {

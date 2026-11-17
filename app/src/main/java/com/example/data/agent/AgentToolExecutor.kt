@@ -1,5 +1,6 @@
 package com.example.data.agent
 
+import com.example.data.network.InternetToolClient
 import com.example.data.workspace.WorkspaceManager
 import com.example.domain.model.PendingDeletionConfirmation
 import com.example.domain.model.ToolDefinition
@@ -14,6 +15,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import okhttp3.OkHttpClient
 
 data class ToolExecutionOutcome(
     val success: Boolean,
@@ -23,9 +25,58 @@ data class ToolExecutionOutcome(
 
 class AgentToolExecutor(
     private val workspaceManager: WorkspaceManager,
-    private val json: Json
+    private val json: Json,
+    private val internetToolClient: InternetToolClient = InternetToolClient(OkHttpClient(), json)
 ) {
     val toolDefinitions: List<ToolDefinition> = listOf(
+        ToolDefinition(
+            name = "web_search",
+            description = "Search the live internet for documentation, API endpoints, libraries, news, facts, or answers.",
+            parametersSchema = buildJsonObject {
+                put("type", "object")
+                putJsonObject("properties") {
+                    putJsonObject("query") {
+                        put("type", "string")
+                        put("description", "Search query string.")
+                    }
+                    putJsonObject("max_results") {
+                        put("type", "integer")
+                        put("description", "Maximum results to return (1-12, default 6).")
+                    }
+                }
+                put("required", buildJsonArray { add(JsonPrimitive("query")) })
+            }
+        ),
+        ToolDefinition(
+            name = "fetch_url",
+            description = "Fetch any http:// or https:// web page, API documentation, JSON endpoint, or raw text file from the internet.",
+            parametersSchema = buildJsonObject {
+                put("type", "object")
+                putJsonObject("properties") {
+                    putJsonObject("url") {
+                        put("type", "string")
+                        put("description", "Full URL starting with http:// or https://.")
+                    }
+                    putJsonObject("method") {
+                        put("type", "string")
+                        put("description", "HTTP method (GET, POST, PUT, DELETE, HEAD). Defaults to GET.")
+                    }
+                    putJsonObject("headers") {
+                        put("type", "object")
+                        put("description", "Optional key-value HTTP headers.")
+                    }
+                    putJsonObject("body") {
+                        put("type", "string")
+                        put("description", "Optional request body for POST/PUT.")
+                    }
+                    putJsonObject("raw") {
+                        put("type", "boolean")
+                        put("description", "Set true to return raw HTML instead of extracted readable text.")
+                    }
+                }
+                put("required", buildJsonArray { add(JsonPrimitive("url")) })
+            }
+        ),
         ToolDefinition(
             name = "list_files",
             description = "List files and subdirectories inside a directory of the active project workspace.",
@@ -172,13 +223,6 @@ class AgentToolExecutor(
         argumentsJson: String,
         confirmDeletion: suspend (PendingDeletionConfirmation) -> Boolean
     ): ToolExecutionOutcome {
-        if (projectId.isNullOrBlank()) {
-            return ToolExecutionOutcome(
-                success = false,
-                output = "Error: No active project workspace is selected. Ask the user to create or select a project in the Workspace tab."
-            )
-        }
-
         val args = try {
             if (argumentsJson.isBlank()) JsonObject(emptyMap())
             else json.parseToJsonElement(argumentsJson).jsonObject
@@ -186,6 +230,50 @@ class AgentToolExecutor(
             return ToolExecutionOutcome(
                 success = false,
                 output = "Error parsing tool arguments JSON: ${e.message}"
+            )
+        }
+
+        // Internet tools work regardless of whether a workspace project is selected
+        when (toolName) {
+            "web_search" -> {
+                val query = args["query"]?.jsonPrimitive?.content
+                    ?: return ToolExecutionOutcome(false, "Missing required parameter: query")
+                val maxResults = args["max_results"]?.jsonPrimitive?.intOrNull ?: 6
+                val res = internetToolClient.webSearch(query, maxResults)
+                return res.fold(
+                    onSuccess = { ToolExecutionOutcome(true, it) },
+                    onFailure = { ToolExecutionOutcome(false, it.message ?: "web_search failed.") }
+                )
+            }
+
+            "fetch_url" -> {
+                val url = args["url"]?.jsonPrimitive?.content
+                    ?: return ToolExecutionOutcome(false, "Missing required parameter: url")
+                val method = args["method"]?.jsonPrimitive?.content ?: "GET"
+                val body = args["body"]?.jsonPrimitive?.content
+                val raw = args["raw"]?.jsonPrimitive?.booleanOrNull ?: false
+                val headersObj = args["headers"] as? JsonObject
+                val headersMap = headersObj?.entries?.associate { (k, v) ->
+                    k to (runCatching { v.jsonPrimitive.content }.getOrDefault(v.toString()))
+                } ?: emptyMap()
+                val res = internetToolClient.fetchUrl(
+                    url = url,
+                    method = method,
+                    headers = headersMap,
+                    body = body,
+                    raw = raw
+                )
+                return res.fold(
+                    onSuccess = { ToolExecutionOutcome(true, it) },
+                    onFailure = { ToolExecutionOutcome(false, it.message ?: "fetch_url failed.") }
+                )
+            }
+        }
+
+        if (projectId.isNullOrBlank()) {
+            return ToolExecutionOutcome(
+                success = false,
+                output = "Error: No active project workspace is selected. Select or create a project in Projects/Code, or use web_search / fetch_url for online tasks."
             )
         }
 
@@ -235,15 +323,15 @@ class AgentToolExecutor(
                 "delete_file" -> {
                     val path = args["path"]?.jsonPrimitive?.content
                         ?: return ToolExecutionOutcome(false, "Missing required parameter: path")
-                    val target = workspaceManager.resolveSafeFile(projectId, path)
-                    if (!target.exists()) {
+                    val stat = workspaceManager.statPath(projectId, path)
+                    if (!stat.exists) {
                         return ToolExecutionOutcome(false, "Path does not exist: '$path'")
                     }
                     val approved = confirmDeletion(
                         PendingDeletionConfirmation(
                             toolCallId = toolCallId,
                             relativePath = path,
-                            isDirectory = target.isDirectory
+                            isDirectory = stat.isDirectory
                         )
                     )
                     if (!approved) {

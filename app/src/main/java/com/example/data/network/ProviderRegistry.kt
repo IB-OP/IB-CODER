@@ -23,12 +23,18 @@ import com.example.data.network.providers.PerplexityAdapter
 import com.example.data.network.providers.TogetherAiAdapter
 import com.example.data.network.providers.XAiAdapter
 import com.example.data.network.providers.ZAiAdapter
+import com.example.domain.model.CustomProviderDefinition
+import com.example.domain.model.ProviderCategory
+import com.example.domain.model.ProviderMetadata
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 
 class ProviderRegistry(
-    okHttpClient: OkHttpClient,
-    json: Json
+    private val okHttpClient: OkHttpClient,
+    private val json: Json
 ) {
     val adapters: List<AiProviderAdapter> = listOf(
         // Free-tier providers
@@ -60,5 +66,37 @@ class ProviderRegistry(
 
     private val byId: Map<String, AiProviderAdapter> = adapters.associateBy { it.metadata.id }
 
-    fun getAdapter(providerId: String): AiProviderAdapter? = byId[providerId]
+    private val _customAdaptersFlow = MutableStateFlow<List<AiProviderAdapter>>(emptyList())
+    val customAdaptersFlow: StateFlow<List<AiProviderAdapter>> = _customAdaptersFlow.asStateFlow()
+
+    @Volatile
+    private var customById: Map<String, AiProviderAdapter> = emptyMap()
+
+    fun syncCustomProviders(definitions: List<CustomProviderDefinition>) {
+        val built = definitions.map { def ->
+            CustomOpenAiAdapter(
+                okHttpClient = okHttpClient,
+                json = json,
+                metadata = ProviderMetadata(
+                    id = def.id,
+                    displayName = def.displayName,
+                    category = ProviderCategory.CUSTOM,
+                    defaultBaseUrl = def.defaultBaseUrl,
+                    description = def.description.ifBlank { "Custom OpenAI-compatible API (${def.defaultBaseUrl})" },
+                    signupUrl = def.signupUrl,
+                    requiresApiKey = def.requiresApiKey,
+                    supportsModelsEndpoint = true,
+                    supportsToolCallingByDefault = true,
+                    modelPlaceholder = def.defaultModel.ifBlank { "Enter model ID" }
+                )
+            )
+        }
+        customById = built.associateBy { it.metadata.id }
+        _customAdaptersFlow.value = built
+    }
+
+    fun allAdapters(): List<AiProviderAdapter> = adapters + _customAdaptersFlow.value
+
+    fun getAdapter(providerId: String): AiProviderAdapter? =
+        byId[providerId] ?: customById[providerId]
 }

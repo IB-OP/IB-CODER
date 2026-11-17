@@ -3,6 +3,9 @@ package com.example.ui.navigation
 import kotlinx.serialization.Serializable
 
 @Serializable
+data object ProjectsRoute
+
+@Serializable
 data object ChatRoute
 
 @Serializable

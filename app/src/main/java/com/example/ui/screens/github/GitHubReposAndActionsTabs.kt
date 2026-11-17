@@ -267,7 +267,7 @@ fun GitHubRepositoriesTab(
                                 Button(onClick = { onCloneRepo(repo) }) {
                                     Icon(Icons.Rounded.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text("Clone to Workspace")
+                                    Text("Open Direct (${repo.defaultBranch.ifBlank { "main" }})")
                                 }
                                 OutlinedButton(onClick = { onSelectRepoForActions(repo) }) {
                                     Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -304,6 +304,7 @@ fun GitHubActionsAndSyncTab(
     onLinkWorkspace: (projectId: String, autoSync: Boolean, autoFix: Boolean) -> Unit,
     onPullIntoProject: (projectId: String) -> Unit,
     onToggleAutoSync: (projectId: String, enabled: Boolean) -> Unit,
+    onToggleDirectMode: (projectId: String, enabled: Boolean) -> Unit,
     onToggleAutoFix: (projectId: String, enabled: Boolean) -> Unit,
     onSyncNow: (projectId: String) -> Unit,
     onToggleBuildPlayBundle: (Boolean) -> Unit,
@@ -432,6 +433,18 @@ fun GitHubActionsAndSyncTab(
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary
                         )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Direct GitHub mode (commit edits immediately to ${linkedConfig.branch.ifBlank { "main" }})", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                            Switch(
+                                checked = linkedConfig.directGitHubMode,
+                                onCheckedChange = { onToggleDirectMode(linkedProject.id, it) },
+                                modifier = Modifier.testTag("github_direct_mode_switch")
+                            )
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,

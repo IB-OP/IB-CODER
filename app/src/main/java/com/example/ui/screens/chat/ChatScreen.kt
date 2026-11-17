@@ -1,5 +1,7 @@
 package com.example.ui.screens.chat
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -43,6 +45,9 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.QuestionAnswer
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Tune
@@ -91,9 +96,13 @@ import com.example.R
 import com.example.domain.model.ChatMessageUi
 import com.example.domain.model.ChatRole
 import com.example.domain.model.GitHubSyncStatus
+import com.example.domain.model.SessionMode
 import com.example.domain.model.ToolCallRecord
 import com.example.domain.model.ToolExecutionStatus
 import com.example.domain.model.ToolSupportStatus
+import com.example.domain.prompt.SystemPromptPresets
+import com.example.ui.components.CreateNewSessionDialog
+import com.example.ui.components.CreateProjectDialog
 import com.example.ui.components.MarkdownMessageContent
 import com.example.ui.theme.BrandWordmarkStyle
 import com.example.ui.theme.JetBrainsMonoFamily
@@ -105,14 +114,23 @@ fun ChatScreen(
     onOpenProviders: () -> Unit,
     onOpenWorkspace: () -> Unit,
     onOpenMcpServers: () -> Unit,
-    onOpenGitHub: () -> Unit = {}
+    onOpenGitHub: () -> Unit = {},
+    onOpenSidebar: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var promptText by rememberSaveable { mutableStateOf("") }
     var showModelDialog by remember { mutableStateOf(false) }
     var showProjectMenu by remember { mutableStateOf(false) }
     var showNewProjectDialog by remember { mutableStateOf(false) }
+    var showNewSessionDialog by remember { mutableStateOf(false) }
+    var showEditPromptDialog by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+
+    val openFolderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) viewModel.createProjectFromDeviceFolder(uri)
+    }
 
     val displayedMessages = remember(state.messages, state.streamingMessage) {
         val base = state.messages.filter { it.role != ChatRole.SYSTEM && it.role != ChatRole.TOOL }
@@ -172,6 +190,16 @@ fun ChatScreen(
                         }
                     }
                 },
+                navigationIcon = {
+                    if (onOpenSidebar != null) {
+                        IconButton(
+                            onClick = onOpenSidebar,
+                            modifier = Modifier.testTag("chat_menu_button")
+                        ) {
+                            Icon(Icons.Rounded.Menu, contentDescription = "Open navigation sidebar")
+                        }
+                    }
+                },
                 actions = {
                     IconButton(
                         onClick = { showModelDialog = true },
@@ -180,7 +208,7 @@ fun ChatScreen(
                         Icon(Icons.Rounded.Tune, contentDescription = "Switch provider or model")
                     }
                     IconButton(
-                        onClick = viewModel::startNewSession,
+                        onClick = { showNewSessionDialog = true },
                         modifier = Modifier.testTag("chat_new_session_button")
                     ) {
                         Icon(Icons.Rounded.AddComment, contentDescription = "New chat session")
@@ -304,6 +332,56 @@ fun ChatScreen(
                         },
                         modifier = Modifier.testTag("chat_mcp_chip")
                     )
+
+                    AssistChip(
+                        onClick = { showEditPromptDialog = true },
+                        label = {
+                            val mode = state.currentSessionPrompt?.mode ?: state.currentSession?.mode
+                            val title = state.currentSessionPrompt?.presetTitle ?: state.currentSession?.presetTitle
+                            Text(
+                                text = when (mode) {
+                                    SessionMode.NORMAL -> "Normal Q&A"
+                                    SessionMode.SPECIAL -> "Special: ${title ?: "Prompt"}"
+                                    null -> "Session Mode"
+                                },
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Rounded.QuestionAnswer,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        modifier = Modifier.testTag("chat_session_mode_chip")
+                    )
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f),
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.45f)),
+                        modifier = Modifier.testTag("chat_web_live_badge")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.Public,
+                                contentDescription = "Live internet search enabled",
+                                tint = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Web Live",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                    }
 
                     if (state.activeGitHubConfig != null) {
                         val syncLabel = when (val s = state.activeSyncStatus) {
@@ -458,9 +536,12 @@ fun ChatScreen(
                     EmptyChatState(
                         hasProject = state.activeProject != null,
                         hasModel = state.selectedModelId.isNotBlank(),
+                        sessionMode = state.currentSessionPrompt?.mode ?: state.currentSession?.mode,
+                        presetTitle = state.currentSessionPrompt?.presetTitle ?: state.currentSession?.presetTitle,
                         onPromptSelected = { prompt -> promptText = prompt },
                         onOpenProviders = onOpenProviders,
                         onCreateProject = { showNewProjectDialog = true },
+                        onNewSession = { showNewSessionDialog = true },
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
@@ -500,8 +581,8 @@ fun ChatScreen(
 
                 // Composer Bar
                 Surface(
-                    tonalElevation = 3.dp,
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -521,19 +602,20 @@ fun ChatScreen(
                             placeholder = {
                                 Text(
                                     if (state.activeProject != null) {
-                                        "Ask agent to inspect, edit, or build code..."
+                                        "Ask IB_AI to build, research live web, or edit workspace..."
                                     } else {
-                                        "Message agent or ask to build an Android app..."
+                                        "Ask anything, search the live web, or build any project..."
                                     }
                                 )
                             },
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(6.dp),
                             maxLines = 5
                         )
 
                         if (state.isGenerating) {
                             FilledIconButton(
                                 onClick = viewModel::stopGeneration,
+                                shape = RoundedCornerShape(6.dp),
                                 modifier = Modifier
                                     .size(48.dp)
                                     .testTag("chat_stop_button"),
@@ -552,6 +634,7 @@ fun ChatScreen(
                                     viewModel.sendMessage(msg)
                                 },
                                 enabled = promptText.isNotBlank(),
+                                shape = RoundedCornerShape(6.dp),
                                 modifier = Modifier
                                     .size(48.dp)
                                     .testTag("chat_send_button")
@@ -627,35 +710,108 @@ fun ChatScreen(
     }
 
     if (showNewProjectDialog) {
-        var projectName by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showNewProjectDialog = false },
-            title = { Text("New Workspace Project") },
-            text = {
-                OutlinedTextField(
-                    value = projectName,
-                    onValueChange = { projectName = it },
-                    label = { Text("Project Name") },
-                    placeholder = { Text("e.g. TaskTrackerApp") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+        CreateProjectDialog(
+            isGitHubSignedIn = state.isGitHubSignedIn,
+            defaultGitHubOwner = state.defaultGitHubOwner,
+            repositories = state.availableGitHubRepos,
+            isLoadingRepos = state.isLoadingGitHubRepos,
+            isBusy = state.isCreatingProject,
+            onPickDeviceFolder = {
+                showNewProjectDialog = false
+                openFolderLauncher.launch(null)
+            },
+            onCreateLocalProject = { name ->
+                viewModel.createProjectAndSelect(name)
+                showNewProjectDialog = false
+            },
+            onCreateDirectGitHubProject = { owner, repo, branch, isPrivate, createNewRepo, includeWorkflow, autoFix ->
+                viewModel.createDirectGitHubProject(
+                    owner = owner,
+                    repo = repo,
+                    branch = branch,
+                    isPrivate = isPrivate,
+                    createNewRepo = createNewRepo,
+                    includeWorkflow = includeWorkflow,
+                    autoFixWorkflowBugs = autoFix
                 )
+                showNewProjectDialog = false
+            },
+            onLoadRepositories = viewModel::loadGitHubRepositories,
+            onOpenGitHubAccount = {
+                showNewProjectDialog = false
+                onOpenGitHub()
+            },
+            onDismiss = { showNewProjectDialog = false }
+        )
+    }
+
+    if (showNewSessionDialog) {
+        CreateNewSessionDialog(
+            hasActiveProject = state.activeProject != null,
+            activeProjectName = state.activeProject?.name,
+            onStartSession = { mode, presetId, presetTitle, prompt, attachProject ->
+                viewModel.startNewConfiguredSession(
+                    mode = mode,
+                    presetId = presetId,
+                    presetTitle = presetTitle,
+                    systemPrompt = prompt,
+                    attachActiveProject = attachProject
+                )
+                showNewSessionDialog = false
+            },
+            onDismiss = { showNewSessionDialog = false }
+        )
+    }
+
+    if (showEditPromptDialog) {
+        val currentPrompt = state.currentSessionPrompt?.systemPrompt
+            ?: if ((state.currentSession?.mode ?: SessionMode.SPECIAL) == SessionMode.NORMAL) {
+                SystemPromptPresets.NORMAL_QA_PROMPT
+            } else {
+                SystemPromptPresets.PRESETS.first().prompt
+            }
+        var promptDraft by remember(state.currentSession?.id, currentPrompt) {
+            mutableStateOf(currentPrompt)
+        }
+        AlertDialog(
+            onDismissRequest = { showEditPromptDialog = false },
+            title = { Text("Active Session System Prompt") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = if (state.currentSession == null) {
+                            "Start a New Session to pick Normal Q&A or a Special System Prompt."
+                        } else {
+                            "Edit the system instructions used for this session:"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = promptDraft,
+                        onValueChange = { promptDraft = it },
+                        enabled = state.currentSession != null,
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMonoFamily),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 140.dp, max = 260.dp)
+                            .testTag("chat_edit_session_prompt_input")
+                    )
+                }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.createProjectAndSelect(projectName)
-                        showNewProjectDialog = false
+                        viewModel.updateActiveSessionSystemPrompt(promptDraft)
+                        showEditPromptDialog = false
                     },
-                    enabled = projectName.isNotBlank()
+                    enabled = state.currentSession != null && promptDraft.isNotBlank()
                 ) {
-                    Text("Create")
+                    Text("Save Prompt")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showNewProjectDialog = false }) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { showEditPromptDialog = false }) { Text("Close") }
             }
         )
     }
@@ -665,9 +821,12 @@ fun ChatScreen(
 private fun EmptyChatState(
     hasProject: Boolean,
     hasModel: Boolean,
+    sessionMode: SessionMode?,
+    presetTitle: String?,
     onPromptSelected: (String) -> Unit,
     onOpenProviders: () -> Unit,
     onCreateProject: () -> Unit,
+    onNewSession: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -676,9 +835,9 @@ private fun EmptyChatState(
         verticalArrangement = Arrangement.Center
     ) {
         Surface(
-            shape = RoundedCornerShape(22.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-            modifier = Modifier.size(84.dp)
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+            modifier = Modifier.size(76.dp)
         ) {
             Image(
                 painter = painterResource(R.drawable.ib_coder_logo),
@@ -687,50 +846,67 @@ private fun EmptyChatState(
                 modifier = Modifier.fillMaxSize()
             )
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(14.dp))
         Text(
             text = "IB CODER",
             style = MaterialTheme.typography.displaySmall
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
         Text(
-            text = "Read, write, edit, search, and scaffold complete Android Gradle apps directly in your workspace.",
+            text = when (sessionMode) {
+                SessionMode.NORMAL -> "Normal Q&A & Live Internet Research session"
+                SessionMode.SPECIAL -> "Special Session • ${presetTitle ?: "Custom System Prompt"}"
+                null -> "Web, Python, Android, automation, docs, and live internet research — all in one AI workbench."
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(14.dp))
 
-        if (!hasModel || !hasProject) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!hasModel) {
-                    Button(
-                        onClick = onOpenProviders,
-                        modifier = Modifier.testTag("empty_configure_provider_button")
-                    ) {
-                        Text("Configure Provider")
-                    }
-                }
-                if (!hasProject) {
-                    OutlinedButton(
-                        onClick = onCreateProject,
-                        modifier = Modifier.testTag("empty_create_project_button")
-                    ) {
-                        Text("Create Project")
-                    }
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onNewSession,
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.testTag("empty_new_session_button")
+            ) {
+                Icon(Icons.Rounded.AddComment, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("New Session")
+            }
+            if (!hasModel) {
+                OutlinedButton(
+                    onClick = onOpenProviders,
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.testTag("empty_configure_provider_button")
+                ) {
+                    Text("Configure Provider")
                 }
             }
-            Spacer(Modifier.height(16.dp))
+            if (!hasProject) {
+                OutlinedButton(
+                    onClick = onCreateProject,
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.testTag("empty_create_project_button")
+                ) {
+                    Text("Create Project")
+                }
+            }
         }
+        Spacer(Modifier.height(16.dp))
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
-                "Inspect the current workspace with list_files and summarize the architecture.",
-                "Build a complete Jetpack Compose Material 3 Android app in this workspace with Gradle Kotlin DSL, MainActivity, Theme, and a working screen.",
-                "Search across project files for any TODOs or potential bugs and fix them."
+                "Search the live web for the latest Kotlin or React documentation and summarize key changes.",
+                "Build a responsive React/HTML dashboard or Python FastAPI service right inside the active workspace.",
+                "Find OpenAI-compatible API documentation for a provider and explain the endpoint & auth headers.",
+                "Inspect the active workspace files and help me fix bugs or add new features."
             ).forEach { suggestion ->
                 Surface(
                     onClick = { onPromptSelected(suggestion) },
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(6.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
@@ -750,18 +926,18 @@ private fun EmptyChatState(
 private fun ChatMessageBubble(message: ChatMessageUi) {
     val isUser = message.role == ChatRole.USER
     val containerColor = if (isUser) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
     } else {
         MaterialTheme.colorScheme.surfaceContainerLow
     }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(6.dp),
         colors = CardDefaults.cardColors(containerColor = containerColor),
         border = BorderStroke(
             1.dp,
-            if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+            if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
             else MaterialTheme.colorScheme.outlineVariant
         )
     ) {
@@ -777,9 +953,10 @@ private fun ChatMessageBubble(message: ChatMessageUi) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (isUser) "You" else "Agent (${message.modelId ?: "AI"})",
+                    text = if (isUser) "[USER]" else "[IB_AI] • ${message.modelId ?: "AI"}",
                     style = MaterialTheme.typography.labelLarge,
-                    color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
+                    fontFamily = JetBrainsMonoFamily,
+                    color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
                 )
                 if (message.isStreaming) {
                     Row(

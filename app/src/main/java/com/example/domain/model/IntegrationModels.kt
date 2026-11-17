@@ -12,6 +12,7 @@ data class GitHubProjectConfig(
     val includeApkWorkflow: Boolean = true,
     val autoSyncEnabled: Boolean = false,
     val autoFixWorkflowBugs: Boolean = false,
+    val directGitHubMode: Boolean = false,
     val lastCommitSha: String = "",
     val lastRepoUrl: String = "",
     val lastActionsUrl: String = "",

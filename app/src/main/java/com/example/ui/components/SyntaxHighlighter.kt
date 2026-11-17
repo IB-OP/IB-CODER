@@ -20,23 +20,23 @@ object SyntaxHighlighter {
     )
 
     val DarkPalette = SyntaxPalette(
-        plain = Color(0xFFF1F5F9),
-        keyword = Color(0xFFFFFFFF),
-        string = Color(0xFF93C5FD),
-        comment = Color(0xFF6B7280),
-        number = Color(0xFFFCD34D),
-        annotation = Color(0xFF6EE7B7),
-        type = Color(0xFFCBD5E1)
+        plain = Color(0xFFE2E8F0),
+        keyword = Color(0xFF7DD3FC),
+        string = Color(0xFFFCD34D),
+        comment = Color(0xFF64748B),
+        number = Color(0xFFFB923C),
+        annotation = Color(0xFF4ADE80),
+        type = Color(0xFFC4B5FD)
     )
 
     val LightPalette = SyntaxPalette(
-        plain = Color(0xFF14181F),
-        keyword = Color(0xFF0F172A),
-        string = Color(0xFF0369A1),
+        plain = Color(0xFF0F172A),
+        keyword = Color(0xFF0284C7),
+        string = Color(0xFFB45309),
         comment = Color(0xFF64748B),
-        number = Color(0xFFB45309),
+        number = Color(0xFFC2410C),
         annotation = Color(0xFF0F766E),
-        type = Color(0xFF334155)
+        type = Color(0xFF6D28D9)
     )
 
     private val kotlinJavaKeywords = setOf(

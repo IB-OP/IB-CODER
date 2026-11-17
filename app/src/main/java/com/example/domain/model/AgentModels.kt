@@ -42,12 +42,28 @@ data class ChatMessageUi(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+@Serializable
+enum class SessionMode {
+    NORMAL,
+    SPECIAL
+}
+
+@Serializable
+data class SessionPromptConfig(
+    val mode: SessionMode = SessionMode.NORMAL,
+    val presetId: String = "normal",
+    val presetTitle: String = "Normal Q&A",
+    val systemPrompt: String = ""
+)
+
 data class ChatSession(
     val id: String,
     val title: String,
     val projectId: String?,
     val providerId: String,
     val modelId: String,
+    val mode: SessionMode = SessionMode.NORMAL,
+    val presetTitle: String? = null,
     val promptTokens: Int = 0,
     val completionTokens: Int = 0,
     val totalTokens: Int = 0,
@@ -61,7 +77,10 @@ data class WorkspaceProject(
     val rootPath: String,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
-)
+) {
+    val isDeviceFolder: Boolean
+        get() = rootPath.startsWith("content://")
+}
 
 data class FileNode(
     val name: String,

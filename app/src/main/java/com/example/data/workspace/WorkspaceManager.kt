@@ -1,6 +1,8 @@
 package com.example.data.workspace
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import com.example.data.local.db.DbMappers.toDomain
 import com.example.data.local.db.ProjectDao
 import com.example.data.local.db.ProjectEntity
@@ -8,6 +10,7 @@ import com.example.domain.model.FileNode
 import com.example.domain.model.WorkspaceProject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -22,7 +25,10 @@ class WorkspaceManager(
     context: Context,
     private val projectDao: ProjectDao
 ) {
-    private val workspacesRoot: File = File(context.filesDir, "workspaces").apply {
+    private val appContext = context.applicationContext
+    private val safStorage = SafDocumentStorage(appContext)
+
+    private val workspacesRoot: File = File(appContext.filesDir, "workspaces").apply {
         if (!exists()) mkdirs()
     }
 
@@ -50,6 +56,37 @@ class WorkspaceManager(
         entity.toDomain()
     }
 
+    suspend fun attachDeviceFolderProject(
+        treeUri: Uri,
+        nameOverride: String? = null
+    ): WorkspaceProject = withContext(Dispatchers.IO) {
+        val rwFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching {
+            appContext.contentResolver.takePersistableUriPermission(treeUri, rwFlags)
+        }
+
+        val uriString = treeUri.toString()
+        val now = System.currentTimeMillis()
+        val existing = projectDao.observeAll().first().firstOrNull { it.rootPath == uriString }
+        if (existing != null) {
+            val updated = existing.copy(updatedAt = now)
+            projectDao.upsert(updated)
+            return@withContext updated.toDomain()
+        }
+
+        val resolvedName = nameOverride?.trim()?.takeIf { it.isNotEmpty() }
+            ?: safStorage.resolveTreeFolderDisplayName(treeUri)
+        val entity = ProjectEntity(
+            id = UUID.randomUUID().toString(),
+            name = resolvedName,
+            rootPath = uriString,
+            createdAt = now,
+            updatedAt = now
+        )
+        projectDao.upsert(entity)
+        entity.toDomain()
+    }
+
     suspend fun renameProject(projectId: String, newName: String) = withContext(Dispatchers.IO) {
         val trimmed = newName.trim()
         if (trimmed.isNotEmpty()) {
@@ -59,10 +96,20 @@ class WorkspaceManager(
 
     suspend fun deleteProject(projectId: String) = withContext(Dispatchers.IO) {
         val entity = projectDao.getById(projectId)
-        if (entity != null) {
-            File(entity.rootPath).deleteRecursively()
-        }
         projectDao.deleteById(projectId)
+        if (entity != null) {
+            if (entity.rootPath.startsWith("content://")) {
+                val stillUsed = projectDao.observeAll().first().any { it.rootPath == entity.rootPath }
+                if (!stillUsed) {
+                    val rwFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    runCatching {
+                        appContext.contentResolver.releasePersistableUriPermission(Uri.parse(entity.rootPath), rwFlags)
+                    }
+                }
+            } else {
+                File(entity.rootPath).deleteRecursively()
+            }
+        }
     }
 
     suspend fun importProjectFromZip(name: String, inputStream: InputStream): WorkspaceProject =
@@ -111,6 +158,31 @@ class WorkspaceManager(
         } else {
             createProject(projectName)
         }
+
+        if (project.isDeviceFolder) {
+            val treeUri = Uri.parse(project.rootPath)
+            safStorage.clearTopLevelExceptGit(treeUri)
+            ZipInputStream(inputStream.buffered()).use { zis ->
+                var entry: ZipEntry? = zis.nextEntry
+                while (entry != null) {
+                    val rawName = entry.name.replace('\\', '/').trimStart('/')
+                    val stripped = rawName.substringAfter('/', missingDelimiterValue = "")
+                    if (stripped.isNotEmpty()) {
+                        if (entry.isDirectory) {
+                            safStorage.createFolder(treeUri, stripped)
+                        } else {
+                            val bytes = zis.readBytes()
+                            safStorage.writeBytes(treeUri, stripped, bytes)
+                        }
+                    }
+                    zis.closeEntry()
+                    entry = zis.nextEntry
+                }
+            }
+            projectDao.touch(project.id, System.currentTimeMillis())
+            return@withContext project
+        }
+
         val rootDir = File(project.rootPath)
         if (!existingProjectId.isNullOrBlank() && rootDir.exists()) {
             rootDir.listFiles()?.forEach { child ->
@@ -154,8 +226,13 @@ class WorkspaceManager(
 
     suspend fun exportProjectToZip(projectId: String, outputStream: OutputStream) =
         withContext(Dispatchers.IO) {
-            val project = projectDao.getById(projectId)
+            val project = projectDao.getById(projectId)?.toDomain()
                 ?: throw IllegalArgumentException("Project not found: $projectId")
+            if (project.isDeviceFolder) {
+                safStorage.exportToZip(Uri.parse(project.rootPath), outputStream)
+                return@withContext
+            }
+
             val rootDir = File(project.rootPath)
             val rootUri = rootDir.toURI()
 
@@ -181,10 +258,71 @@ class WorkspaceManager(
             }
         }
 
+    suspend fun statPath(projectId: String, relativePath: String): WorkspacePathStat =
+        withContext(Dispatchers.IO) {
+            val project = projectDao.getById(projectId)?.toDomain()
+                ?: throw IllegalArgumentException("No active project selected.")
+            if (project.isDeviceFolder) {
+                return@withContext safStorage.statPath(Uri.parse(project.rootPath), relativePath)
+            }
+            val root = resolveSafeLocalFile(project.rootPath, ".")
+            val target = resolveSafeLocalFile(project.rootPath, relativePath)
+            WorkspacePathStat(
+                exists = target.exists(),
+                isDirectory = target.isDirectory,
+                sizeBytes = if (target.isFile) target.length() else 0L,
+                isRoot = target.canonicalPath == root.canonicalPath
+            )
+        }
+
+    suspend fun collectProjectFilesForSync(
+        projectId: String,
+        ignoredDirs: Set<String>,
+        maxBlobBytes: Int
+    ): List<SyncFileEntry> = withContext(Dispatchers.IO) {
+        val project = projectDao.getById(projectId)?.toDomain()
+            ?: throw IllegalArgumentException("Active workspace project not found.")
+        if (project.isDeviceFolder) {
+            return@withContext safStorage.collectFilesForSync(Uri.parse(project.rootPath), ignoredDirs, maxBlobBytes)
+        }
+
+        val rootDir = File(project.rootPath)
+        if (!rootDir.exists()) return@withContext emptyList()
+        val rootUri = rootDir.toURI()
+        val files = rootDir.walkTopDown()
+            .onEnter { dir -> dir == rootDir || dir.name !in ignoredDirs }
+            .filter { it.isFile }
+            .sortedBy { it.absolutePath }
+            .toList()
+
+        files.mapNotNull { file ->
+            val relPath = rootUri.relativize(file.toURI()).path
+                .replace('\\', '/')
+                .trimStart('/')
+            if (relPath.isBlank()) return@mapNotNull null
+            val bytes = file.readBytes()
+            if (bytes.size > maxBlobBytes) {
+                error("File '$relPath' exceeds ${maxBlobBytes / (1024 * 1024)} MB GitHub API upload limit.")
+            }
+            SyncFileEntry(
+                relativePath = relPath,
+                bytes = bytes,
+                isExecutable = file.name == "gradlew" || file.name.endsWith(".sh")
+            )
+        }
+    }
+
     suspend fun resolveSafeFile(projectId: String, relativePath: String): File {
         val project = projectDao.getById(projectId)
             ?: throw IllegalArgumentException("No active project selected.")
-        val rootDir = File(project.rootPath)
+        if (project.rootPath.startsWith("content://")) {
+            throw IllegalStateException("Direct java.io.File access is unavailable for Files-app folder workspaces.")
+        }
+        return resolveSafeLocalFile(project.rootPath, relativePath)
+    }
+
+    private fun resolveSafeLocalFile(rootPath: String, relativePath: String): File {
+        val rootDir = File(rootPath)
         if (!rootDir.exists()) rootDir.mkdirs()
 
         val cleaned = relativePath.trim()
@@ -205,7 +343,10 @@ class WorkspaceManager(
     }
 
     suspend fun buildFileTree(projectId: String): List<FileNode> = withContext(Dispatchers.IO) {
-        val project = projectDao.getById(projectId) ?: return@withContext emptyList()
+        val project = projectDao.getById(projectId)?.toDomain() ?: return@withContext emptyList()
+        if (project.isDeviceFolder) {
+            return@withContext safStorage.buildFileTree(Uri.parse(project.rootPath))
+        }
         val rootDir = File(project.rootPath)
         if (!rootDir.exists()) return@withContext emptyList()
 
@@ -234,7 +375,12 @@ class WorkspaceManager(
 
     suspend fun listDirectory(projectId: String, relativePath: String): String =
         withContext(Dispatchers.IO) {
-            val target = resolveSafeFile(projectId, relativePath)
+            val project = projectDao.getById(projectId)?.toDomain()
+                ?: throw IllegalArgumentException("No active project selected.")
+            if (project.isDeviceFolder) {
+                return@withContext safStorage.listDirectory(Uri.parse(project.rootPath), relativePath)
+            }
+            val target = resolveSafeLocalFile(project.rootPath, relativePath)
             if (!target.exists()) {
                 throw IllegalArgumentException("Path does not exist: $relativePath")
             }
@@ -260,16 +406,22 @@ class WorkspaceManager(
         startLine: Int? = null,
         endLine: Int? = null
     ): String = withContext(Dispatchers.IO) {
-        val target = resolveSafeFile(projectId, relativePath)
-        if (!target.exists()) throw IllegalArgumentException("File not found: $relativePath")
-        if (!target.isFile) throw IllegalArgumentException("Not a regular file: $relativePath")
-        if (target.length() > MAX_READ_BYTES) {
-            throw IllegalArgumentException("File exceeds ${MAX_READ_BYTES / 1024} KB read limit.")
+        val project = projectDao.getById(projectId)?.toDomain()
+            ?: throw IllegalArgumentException("No active project selected.")
+        val rawText = if (project.isDeviceFolder) {
+            safStorage.readText(Uri.parse(project.rootPath), relativePath, MAX_READ_BYTES)
+        } else {
+            val target = resolveSafeLocalFile(project.rootPath, relativePath)
+            if (!target.exists()) throw IllegalArgumentException("File not found: $relativePath")
+            if (!target.isFile) throw IllegalArgumentException("Not a regular file: $relativePath")
+            if (target.length() > MAX_READ_BYTES) {
+                throw IllegalArgumentException("File exceeds ${MAX_READ_BYTES / 1024} KB read limit.")
+            }
+            target.readText(Charsets.UTF_8)
         }
 
-        val lines = target.readLines(Charsets.UTF_8)
-        if (lines.isEmpty()) return@withContext "(empty file)"
-
+        if (rawText.isEmpty()) return@withContext "(empty file)"
+        val lines = rawText.lines()
         val from = (startLine ?: 1).coerceAtLeast(1)
         val to = (endLine ?: lines.size).coerceAtMost(lines.size)
         if (from > to) return@withContext "(requested range $from..$to is empty)"
@@ -285,7 +437,12 @@ class WorkspaceManager(
 
     suspend fun readRawFile(projectId: String, relativePath: String): String =
         withContext(Dispatchers.IO) {
-            val target = resolveSafeFile(projectId, relativePath)
+            val project = projectDao.getById(projectId)?.toDomain()
+                ?: throw IllegalArgumentException("No active project selected.")
+            if (project.isDeviceFolder) {
+                return@withContext safStorage.readText(Uri.parse(project.rootPath), relativePath, MAX_READ_BYTES)
+            }
+            val target = resolveSafeLocalFile(project.rootPath, relativePath)
             if (!target.exists() || !target.isFile) {
                 throw IllegalArgumentException("File not found: $relativePath")
             }
@@ -297,10 +454,17 @@ class WorkspaceManager(
 
     suspend fun writeFile(projectId: String, relativePath: String, content: String): String =
         withContext(Dispatchers.IO) {
-            val target = resolveSafeFile(projectId, relativePath)
-            target.parentFile?.mkdirs()
-            val existed = target.exists()
-            target.writeText(content, Charsets.UTF_8)
+            val project = projectDao.getById(projectId)?.toDomain()
+                ?: throw IllegalArgumentException("No active project selected.")
+            val existed = if (project.isDeviceFolder) {
+                safStorage.writeText(Uri.parse(project.rootPath), relativePath, content)
+            } else {
+                val target = resolveSafeLocalFile(project.rootPath, relativePath)
+                target.parentFile?.mkdirs()
+                val had = target.exists()
+                target.writeText(content, Charsets.UTF_8)
+                had
+            }
             projectDao.touch(projectId, System.currentTimeMillis())
             val lineCount = content.lines().size
             if (existed) {
@@ -318,12 +482,10 @@ class WorkspaceManager(
         replaceAll: Boolean = false
     ): String = withContext(Dispatchers.IO) {
         if (find.isEmpty()) throw IllegalArgumentException("'find' string must not be empty.")
-        val target = resolveSafeFile(projectId, relativePath)
-        if (!target.exists() || !target.isFile) {
-            throw IllegalArgumentException("File not found: $relativePath")
-        }
+        val project = projectDao.getById(projectId)?.toDomain()
+            ?: throw IllegalArgumentException("No active project selected.")
+        val original = readRawFile(projectId, relativePath)
 
-        val original = target.readText(Charsets.UTF_8)
         var count = 0
         var searchIndex = 0
         while (true) {
@@ -351,7 +513,11 @@ class WorkspaceManager(
             original.substring(0, firstIdx) + replace + original.substring(firstIdx + find.length)
         }
 
-        target.writeText(updated, Charsets.UTF_8)
+        if (project.isDeviceFolder) {
+            safStorage.writeText(Uri.parse(project.rootPath), relativePath, updated)
+        } else {
+            resolveSafeLocalFile(project.rootPath, relativePath).writeText(updated, Charsets.UTF_8)
+        }
         projectDao.touch(projectId, System.currentTimeMillis())
         val replacedCount = if (replaceAll) count else 1
         "Edited '$relativePath': replaced $replacedCount occurrence(s)."
@@ -359,7 +525,15 @@ class WorkspaceManager(
 
     suspend fun createFolder(projectId: String, relativePath: String): String =
         withContext(Dispatchers.IO) {
-            val target = resolveSafeFile(projectId, relativePath)
+            val project = projectDao.getById(projectId)?.toDomain()
+                ?: throw IllegalArgumentException("No active project selected.")
+            if (project.isDeviceFolder) {
+                val alreadyExisted = safStorage.createFolder(Uri.parse(project.rootPath), relativePath)
+                if (alreadyExisted) return@withContext "Folder already exists: '$relativePath'"
+                projectDao.touch(projectId, System.currentTimeMillis())
+                return@withContext "Created folder '$relativePath'."
+            }
+            val target = resolveSafeLocalFile(project.rootPath, relativePath)
             if (target.exists()) {
                 if (target.isDirectory) return@withContext "Folder already exists: '$relativePath'"
                 throw IllegalArgumentException("A file already exists at '$relativePath'.")
@@ -373,18 +547,25 @@ class WorkspaceManager(
 
     suspend fun deletePath(projectId: String, relativePath: String): String =
         withContext(Dispatchers.IO) {
-            val target = resolveSafeFile(projectId, relativePath)
-            val root = resolveSafeFile(projectId, ".")
-            if (target.canonicalPath == root.canonicalPath) {
-                throw IllegalArgumentException("Cannot delete the project root directory.")
-            }
-            if (!target.exists()) {
-                throw IllegalArgumentException("Path does not exist: '$relativePath'")
-            }
-            val wasDir = target.isDirectory
-            val deleted = if (wasDir) target.deleteRecursively() else target.delete()
-            if (!deleted) {
-                throw IllegalStateException("Failed to delete '$relativePath'")
+            val project = projectDao.getById(projectId)?.toDomain()
+                ?: throw IllegalArgumentException("No active project selected.")
+            val wasDir = if (project.isDeviceFolder) {
+                safStorage.deletePath(Uri.parse(project.rootPath), relativePath)
+            } else {
+                val target = resolveSafeLocalFile(project.rootPath, relativePath)
+                val root = resolveSafeLocalFile(project.rootPath, ".")
+                if (target.canonicalPath == root.canonicalPath) {
+                    throw IllegalArgumentException("Cannot delete the project root directory.")
+                }
+                if (!target.exists()) {
+                    throw IllegalArgumentException("Path does not exist: '$relativePath'")
+                }
+                val dir = target.isDirectory
+                val deleted = if (dir) target.deleteRecursively() else target.delete()
+                if (!deleted) {
+                    throw IllegalStateException("Failed to delete '$relativePath'")
+                }
+                dir
             }
             projectDao.touch(projectId, System.currentTimeMillis())
             if (wasDir) "Deleted folder '$relativePath'." else "Deleted file '$relativePath'."
@@ -397,11 +578,23 @@ class WorkspaceManager(
         isRegex: Boolean = false
     ): String = withContext(Dispatchers.IO) {
         if (query.isEmpty()) throw IllegalArgumentException("Search query must not be empty.")
-        val base = resolveSafeFile(projectId, relativePath)
+        val project = projectDao.getById(projectId)?.toDomain()
+            ?: throw IllegalArgumentException("Project not found")
+        if (project.isDeviceFolder) {
+            return@withContext safStorage.searchFiles(
+                treeUri = Uri.parse(project.rootPath),
+                query = query,
+                relativePath = relativePath,
+                isRegex = isRegex,
+                maxFileBytes = MAX_SEARCH_FILE_BYTES,
+                maxResults = MAX_SEARCH_RESULTS,
+                binaryExtensions = BINARY_EXTENSIONS
+            )
+        }
+
+        val base = resolveSafeLocalFile(project.rootPath, relativePath)
         if (!base.exists()) throw IllegalArgumentException("Search path does not exist: $relativePath")
 
-        val project = projectDao.getById(projectId)
-            ?: throw IllegalArgumentException("Project not found")
         val rootUri = File(project.rootPath).toURI()
         val regex = if (isRegex) Regex(query) else null
 

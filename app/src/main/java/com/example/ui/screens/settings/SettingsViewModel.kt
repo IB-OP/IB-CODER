@@ -1,5 +1,7 @@
 package com.example.ui.screens.settings
 
+import android.content.Context
+import androidx.credentials.CredentialManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -7,6 +9,9 @@ import com.example.AppContainer
 import com.example.data.network.GitHubPushClient
 import com.example.data.network.ProviderRegistry
 import com.example.data.preferences.SettingsDataStore
+import com.example.data.remote.CloudAccountVaultRepository
+import com.example.data.remote.CloudVaultSyncStatus
+import com.example.domain.model.AppAccountSession
 import com.example.domain.model.AppSettings
 import com.example.domain.model.ProviderConfig
 import com.example.domain.model.ProviderMetadata
@@ -19,6 +24,8 @@ import kotlinx.coroutines.launch
 
 data class SettingsUiState(
     val settings: AppSettings = AppSettings(),
+    val accountSession: AppAccountSession = AppAccountSession(),
+    val cloudSyncStatus: CloudVaultSyncStatus = CloudVaultSyncStatus.SignedOut,
     val providers: List<ProviderMetadata> = emptyList(),
     val providerConfigs: Map<String, ProviderConfig> = emptyMap(),
     val mcpEnabledCount: Int = 0,
@@ -33,7 +40,8 @@ data class SettingsUiState(
 class SettingsViewModel(
     private val settingsDataStore: SettingsDataStore,
     private val providerRegistry: ProviderRegistry,
-    private val gitHubPushClient: GitHubPushClient
+    private val gitHubPushClient: GitHubPushClient,
+    private val cloudAccountVaultRepository: CloudAccountVaultRepository
 ) : ViewModel() {
 
     private val savedBanner = MutableStateFlow<String?>(null)
@@ -42,7 +50,7 @@ class SettingsViewModel(
     private val gitHubVerifyingState = MutableStateFlow(false)
 
     private val _uiState = MutableStateFlow(
-        SettingsUiState(providers = providerRegistry.adapters.map { it.metadata })
+        SettingsUiState(providers = providerRegistry.allAdapters().map { it.metadata })
     )
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
@@ -79,10 +87,19 @@ class SettingsViewModel(
                 GitHubBundle(token, owner, status, verifying)
             }
 
-            combine(baseFlow, gitHubFlow) { b, gh ->
+            val accountFlow = combine(
+                settingsDataStore.appAccountSessionFlow,
+                cloudAccountVaultRepository.syncStatus
+            ) { session, syncStatus ->
+                session to syncStatus
+            }
+
+            combine(baseFlow, gitHubFlow, accountFlow, providerRegistry.customAdaptersFlow) { b, gh, acct, _ ->
                 SettingsUiState(
                     settings = b.settings,
-                    providers = providerRegistry.adapters.map { it.metadata },
+                    accountSession = acct.first,
+                    cloudSyncStatus = acct.second,
+                    providers = providerRegistry.allAdapters().map { it.metadata },
                     providerConfigs = b.configs,
                     mcpEnabledCount = b.mcpEnabledCount,
                     mcpToolCount = b.mcpToolCount,
@@ -95,6 +112,26 @@ class SettingsViewModel(
             }.collect { state ->
                 _uiState.value = state
             }
+        }
+    }
+
+    fun syncAccountVaultNow() {
+        viewModelScope.launch {
+            cloudAccountVaultRepository.syncNow().fold(
+                onSuccess = {
+                    savedBanner.value = "Account vault synced across devices."
+                },
+                onFailure = { err ->
+                    savedBanner.value = "Sync failed: ${err.message ?: "Check network connection."}"
+                }
+            )
+        }
+    }
+
+    fun signOutAccount(context: Context) {
+        viewModelScope.launch {
+            val cm = CredentialManager.create(context)
+            cloudAccountVaultRepository.signOutAccount(cm, clearLocalVaultSecrets = true)
         }
     }
 
@@ -178,7 +215,8 @@ class SettingsViewModel(
             return SettingsViewModel(
                 settingsDataStore = container.settingsDataStore,
                 providerRegistry = container.providerRegistry,
-                gitHubPushClient = container.gitHubPushClient
+                gitHubPushClient = container.gitHubPushClient,
+                cloudAccountVaultRepository = container.cloudAccountVaultRepository
             ) as T
         }
     }

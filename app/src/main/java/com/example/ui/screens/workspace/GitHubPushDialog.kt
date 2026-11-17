@@ -65,7 +65,8 @@ fun GitHubPushDialog(
         createIfMissing: Boolean,
         includeApkWorkflow: Boolean,
         autoSyncEnabled: Boolean,
-        autoFixWorkflowBugs: Boolean
+        autoFixWorkflowBugs: Boolean,
+        directGitHubMode: Boolean
     ) -> Unit,
     onCheckBuildStatus: (token: String, owner: String, repo: String) -> Unit,
     onDismiss: () -> Unit
@@ -100,6 +101,9 @@ fun GitHubPushDialog(
     }
     var autoFixWorkflowBugs by remember(project.id, savedCfg?.autoFixWorkflowBugs) {
         mutableStateOf(savedCfg?.autoFixWorkflowBugs ?: false)
+    }
+    var directGitHubMode by remember(project.id, savedCfg?.directGitHubMode) {
+        mutableStateOf(savedCfg?.directGitHubMode ?: false)
     }
 
     LaunchedEffect(state.gitHubVerifyState) {
@@ -266,8 +270,16 @@ fun GitHubPushDialog(
                 )
                 ToggleRow(
                     title = "Auto-sync future edits & AI changes to GitHub",
-                    checked = autoSyncEnabled,
+                    checked = autoSyncEnabled || directGitHubMode,
                     onCheckedChange = { autoSyncEnabled = it }
+                )
+                ToggleRow(
+                    title = "Make '${branch.ifBlank { "main" }}' primary live source (commit edits immediately)",
+                    checked = directGitHubMode,
+                    onCheckedChange = {
+                        directGitHubMode = it
+                        if (it) autoSyncEnabled = true
+                    }
                 )
                 ToggleRow(
                     title = "Auto-prompt AI if pushed workflow fails",
@@ -450,7 +462,8 @@ fun GitHubPushDialog(
                         createIfMissing,
                         includeApkWorkflow,
                         autoSyncEnabled,
-                        autoFixWorkflowBugs
+                        autoFixWorkflowBugs,
+                        directGitHubMode
                     )
                 },
                 enabled = !isPushing && token.isNotBlank() && repo.isNotBlank(),

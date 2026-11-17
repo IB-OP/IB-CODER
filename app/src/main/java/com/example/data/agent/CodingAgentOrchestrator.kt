@@ -11,11 +11,13 @@ import com.example.domain.model.ChatMessageDto
 import com.example.domain.model.ChatMessageUi
 import com.example.domain.model.ChatRole
 import com.example.domain.model.PendingDeletionConfirmation
+import com.example.domain.model.SessionMode
 import com.example.domain.model.StreamEvent
 import com.example.domain.model.ToolCallDto
 import com.example.domain.model.ToolCallRecord
 import com.example.domain.model.ToolExecutionStatus
 import com.example.domain.model.ToolSupportStatus
+import com.example.domain.prompt.SystemPromptPresets
 import kotlinx.coroutines.CancellationException
 import java.util.UUID
 
@@ -43,6 +45,7 @@ class CodingAgentOrchestrator(
         val config = settingsDataStore.getProviderConfig(providerId) ?: adapter.defaultConfig()
         val apiKey = settingsDataStore.getApiKey(providerId)
         val settings = settingsDataStore.getSettings()
+        val sessionPromptCfg = settingsDataStore.getSessionPromptConfig(sessionId)
 
         // Auto-title new session from the first user prompt
         val existingMessages = chatRepository.getMessages(sessionId)
@@ -66,10 +69,19 @@ class CodingAgentOrchestrator(
         val resolvedMcpTools = mcpManager.getEnabledResolvedTools()
         val mcpLookup = resolvedMcpTools.associateBy { it.exposedName }
 
-        val projectSummary = buildWorkspaceSummary(projectId)
+        val basePrompt = when {
+            sessionPromptCfg != null && sessionPromptCfg.systemPrompt.isNotBlank() ->
+                sessionPromptCfg.systemPrompt
+            sessionPromptCfg?.mode == SessionMode.NORMAL ->
+                SystemPromptPresets.NORMAL_QA_PROMPT
+            else ->
+                settings.systemPrompt
+        }
+
+        val projectSummary = buildWorkspaceSummary(projectId, sessionPromptCfg?.mode)
         val mcpSummary = if (resolvedMcpTools.isNotEmpty()) {
             buildString {
-                appendLine("Connected MCP Tools (callable alongside workspace tools):")
+                appendLine("Connected MCP Tools (callable alongside workspace & internet tools):")
                 for (t in resolvedMcpTools) {
                     appendLine("  - ${t.exposedName} (${t.serverName}): ${t.description}")
                 }
@@ -79,7 +91,7 @@ class CodingAgentOrchestrator(
         }
 
         val fullSystemPrompt = buildString {
-            append(settings.systemPrompt)
+            append(basePrompt)
             append("\n\n")
             append(projectSummary)
             if (mcpSummary.isNotBlank()) {
@@ -274,9 +286,16 @@ class CodingAgentOrchestrator(
         private val MUTATING_TOOLS = setOf("write_file", "edit_file", "create_folder", "delete_file")
     }
 
-    private suspend fun buildWorkspaceSummary(projectId: String?): String {
+    private suspend fun buildWorkspaceSummary(
+        projectId: String?,
+        sessionMode: SessionMode?
+    ): String {
         if (projectId.isNullOrBlank()) {
-            return "Active Workspace: None selected. If the user wants to read/write project files, ask them to create or select a project in the Workspace tab."
+            return if (sessionMode == SessionMode.NORMAL) {
+                "Active Workspace: None (Normal Q&A & Live Internet mode — use web_search and fetch_url for online information)."
+            } else {
+                "Active Workspace: None selected. You can answer questions and use web_search/fetch_url, or ask the user to open/create a project in Projects if they want file edits."
+            }
         }
         val project = workspaceManager.getProject(projectId)
             ?: return "Active Workspace: None selected."

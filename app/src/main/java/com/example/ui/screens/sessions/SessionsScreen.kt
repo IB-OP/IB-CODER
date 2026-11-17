@@ -23,6 +23,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DriveFileRenameOutline
 import androidx.compose.material.icons.rounded.Forum
+import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -51,6 +52,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.model.ChatSession
+import com.example.domain.model.SessionMode
+import com.example.ui.components.CreateNewSessionDialog
 import java.text.DateFormat
 import java.util.Date
 
@@ -58,24 +61,34 @@ import java.util.Date
 @Composable
 fun SessionsScreen(
     viewModel: SessionsViewModel,
-    onOpenChat: () -> Unit
+    activeProjectName: String? = null,
+    onOpenChat: () -> Unit,
+    onOpenSidebar: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    var showCreateSessionDialog by remember { mutableStateOf(false) }
     var sessionToRename by remember { mutableStateOf<ChatSession?>(null) }
     var sessionToDelete by remember { mutableStateOf<ChatSession?>(null) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Chat Sessions", style = MaterialTheme.typography.titleLarge) }
+                title = { Text("Chat Sessions", style = MaterialTheme.typography.titleLarge) },
+                navigationIcon = {
+                    if (onOpenSidebar != null) {
+                        IconButton(
+                            onClick = onOpenSidebar,
+                            modifier = Modifier.testTag("sessions_menu_button")
+                        ) {
+                            Icon(Icons.Rounded.Menu, contentDescription = "Open navigation sidebar")
+                        }
+                    }
+                }
             )
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = {
-                    viewModel.createNewSession()
-                    onOpenChat()
-                },
+                onClick = { showCreateSessionDialog = true },
                 modifier = Modifier.testTag("sessions_new_fab")
             ) {
                 Icon(Icons.Rounded.AddComment, contentDescription = "Start new chat session")
@@ -200,6 +213,15 @@ fun SessionsScreen(
                                         )
                                         Spacer(Modifier.height(4.dp))
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Text(
+                                                text = if (session.mode == SessionMode.NORMAL) {
+                                                    "Normal Q&A"
+                                                } else {
+                                                    session.presetTitle ?: "Special Prompt"
+                                                },
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.tertiary
+                                            )
                                             if (projectName != null) {
                                                 Text(
                                                     text = projectName,
@@ -297,6 +319,24 @@ fun SessionsScreen(
             dismissButton = {
                 TextButton(onClick = { sessionToDelete = null }) { Text("Cancel") }
             }
+        )
+    }
+
+    if (showCreateSessionDialog) {
+        CreateNewSessionDialog(
+            hasActiveProject = !activeProjectName.isNullOrBlank(),
+            activeProjectName = activeProjectName,
+            onStartSession = { mode, presetId, presetTitle, prompt, _ ->
+                viewModel.createNewSession(
+                    mode = mode,
+                    presetId = presetId,
+                    presetTitle = presetTitle,
+                    systemPrompt = prompt
+                )
+                showCreateSessionDialog = false
+                onOpenChat()
+            },
+            onDismiss = { showCreateSessionDialog = false }
         )
     }
 }

@@ -7,16 +7,24 @@ import com.example.data.agent.AgentToolExecutor
 import com.example.data.local.db.AppDatabase
 import com.example.data.network.GitHubPushClient
 import com.example.data.network.GitHubSyncManager
+import com.example.data.network.InternetToolClient
 import com.example.data.network.McpClient
 import com.example.data.network.ProviderRegistry
 import com.example.data.preferences.SettingsDataStore
 import com.example.data.security.KeystoreCryptoManager
+import com.example.data.workspace.SafDocumentStorage
 import com.example.data.workspace.WorkspaceManager
+import com.example.domain.model.CustomProviderDefinition
+import com.example.domain.model.GitHubProjectConfig
 import com.example.domain.model.GitHubWorkflowJobLog
 import com.example.domain.model.GitHubWorkflowRunSummary
 import com.example.domain.model.McpServerConfig
 import com.example.domain.model.McpTransport
+import com.example.domain.model.SessionMode
+import com.example.domain.model.SessionPromptConfig
 import com.example.domain.model.ToolSupportStatus
+import com.example.domain.model.WorkspaceProject
+import com.example.domain.prompt.SystemPromptPresets
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -377,5 +385,255 @@ class AgentWorkspaceAndProviderTest {
         val signedOut = settings.appAccountSessionFlow.first()
         assertFalse(signedOut.isSignedIn)
         assertTrue(signedOut.requireSignInOnLaunch)
+    }
+
+    @Test
+    fun `saf storage blocks traversal and project detects device folder uri`() = runTest {
+        val deviceProj = WorkspaceProject(
+            id = "p1",
+            name = "MyPhoneFolder",
+            rootPath = "content://com.android.externalstorage.documents/tree/primary%3AMyApp"
+        )
+        val localProj = WorkspaceProject(
+            id = "p2",
+            name = "LocalApp",
+            rootPath = "/data/user/0/com.example/files/workspaces/p2"
+        )
+        assertTrue(deviceProj.isDeviceFolder)
+        assertFalse(localProj.isDeviceFolder)
+
+        val saf = SafDocumentStorage(context)
+        assertEquals(listOf("app", "src", "Main.kt"), saf.normalizeSegments("/app/./src\\Main.kt"))
+        var blocked = false
+        try {
+            saf.normalizeSegments("app/../../etc/passwd")
+        } catch (_: SecurityException) {
+            blocked = true
+        }
+        assertTrue("Expected SAF normalization to block parent traversal", blocked)
+    }
+
+    @Test
+    fun `statPath collectProjectFilesForSync and directGitHubMode behave correctly`() = runTest {
+        val project = workspaceManager.createProject("DirectApp")
+        workspaceManager.createFolder(project.id, "build/outputs")
+        workspaceManager.writeFile(project.id, "build/outputs/ignored.txt", "skip")
+        workspaceManager.writeFile(project.id, "gradlew", "#!/bin/sh\necho ok")
+        workspaceManager.writeFile(project.id, "app/src/Main.kt", "fun main() {}")
+
+        val statMain = workspaceManager.statPath(project.id, "app/src/Main.kt")
+        assertTrue(statMain.exists)
+        assertFalse(statMain.isDirectory)
+
+        val statDir = workspaceManager.statPath(project.id, "app/src")
+        assertTrue(statDir.exists)
+        assertTrue(statDir.isDirectory)
+
+        val syncFiles = workspaceManager.collectProjectFilesForSync(
+            projectId = project.id,
+            ignoredDirs = setOf(".git", ".gradle", "build", ".idea"),
+            maxBlobBytes = 1024 * 1024
+        )
+        assertEquals(listOf("app/src/Main.kt", "gradlew"), syncFiles.map { it.relativePath })
+        assertTrue(syncFiles.first { it.relativePath == "gradlew" }.isExecutable)
+        assertFalse(syncFiles.first { it.relativePath == "app/src/Main.kt" }.isExecutable)
+
+        val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        val settings = SettingsDataStore(context, KeystoreCryptoManager(), json)
+        val ghClient = GitHubPushClient(OkHttpClient(), workspaceManager, json)
+        val syncManager = GitHubSyncManager(settings, ghClient)
+
+        settings.saveGitHubProjectConfig(
+            project.id,
+            GitHubProjectConfig(owner = "octocat", repo = "DirectApp", branch = "main")
+        )
+        syncManager.setDirectGitHubMode(project.id, true)
+        val updated = settings.getGitHubProjectConfig(project.id)!!
+        assertTrue(updated.directGitHubMode)
+        assertTrue(updated.autoSyncEnabled)
+        assertEquals("main", updated.branch)
+    }
+
+    @Test
+    fun `internet tool client fetches web pages, strips HTML, and runs without an active project`() = runTest {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/docs") { exchange ->
+            val html = """
+                <!doctype html>
+                <html>
+                  <head><script>console.log("ignore")</script></head>
+                  <body><h1>API Docs</h1><p>Endpoint is /v1/chat/completions</p></body>
+                </html>
+            """.trimIndent().toByteArray(Charsets.UTF_8)
+            exchange.responseHeaders.add("Content-Type", "text/html; charset=utf-8")
+            exchange.sendResponseHeaders(200, html.size.toLong())
+            exchange.responseBody.use { it.write(html) }
+        }
+        server.start()
+
+        try {
+            val json = Json { ignoreUnknownKeys = true; isLenient = true }
+            val internet = InternetToolClient(OkHttpClient(), json)
+            val port = server.address.port
+
+            val fetched = internet.fetchUrl("http://127.0.0.1:$port/docs")
+            assertTrue(fetched.isSuccess)
+            val text = fetched.getOrThrow()
+            assertTrue(text.contains("HTTP 200"))
+            assertTrue(text.contains("API Docs"))
+            assertTrue(text.contains("/v1/chat/completions"))
+            assertFalse(text.contains("console.log"))
+
+            val emptySearch = internet.webSearch("   ")
+            assertTrue(emptySearch.isFailure)
+
+            val curated = internet.discoverApiEndpoint("cerebras")
+            assertTrue(curated.any { it.baseUrl == "https://api.cerebras.ai/v1" })
+
+            val directCandidate = internet.discoverApiEndpoint("my-llm.example.org")
+            assertTrue(directCandidate.any { it.baseUrl == "https://my-llm.example.org/v1" })
+
+            // AgentToolExecutor runs fetch_url with projectId = null, while blocking workspace tools cleanly
+            val executor = AgentToolExecutor(workspaceManager, json, internet)
+            val netOutcome = executor.execute(
+                projectId = null,
+                toolCallId = "net1",
+                toolName = "fetch_url",
+                argumentsJson = """{"url":"http://127.0.0.1:$port/docs"}""",
+                confirmDeletion = { false }
+            )
+            assertTrue(netOutcome.success)
+            assertTrue(netOutcome.output.contains("/v1/chat/completions"))
+
+            val missingWorkspaceOutcome = executor.execute(
+                projectId = null,
+                toolCallId = "fs1",
+                toolName = "list_files",
+                argumentsJson = """{}""",
+                confirmDeletion = { false }
+            )
+            assertFalse(missingWorkspaceOutcome.success)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `custom providers and session prompt configs persist and resolve in registry`() = runTest {
+        val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        val settings = SettingsDataStore(context, KeystoreCryptoManager(), json)
+
+        val customDef = CustomProviderDefinition(
+            id = "custom_cerebras_test",
+            displayName = "Cerebras Custom",
+            defaultBaseUrl = "https://api.cerebras.ai/v1",
+            signupUrl = "https://cloud.cerebras.ai/",
+            defaultModel = "llama-3.3-70b"
+        )
+        settings.saveCustomProvider(customDef)
+        val storedCustom = settings.customProvidersFlow.first()
+        assertEquals(1, storedCustom.size)
+
+        registry.syncCustomProviders(storedCustom)
+        assertEquals(23, registry.adapters.size)
+        assertEquals(24, registry.allAdapters().size)
+        assertEquals("https://api.cerebras.ai/v1", registry.getAdapter("custom_cerebras_test")?.metadata?.defaultBaseUrl)
+
+        settings.deleteCustomProvider("custom_cerebras_test")
+        registry.syncCustomProviders(settings.customProvidersFlow.first())
+        assertEquals(23, registry.allAdapters().size)
+
+        // Normal vs Special Session Prompt Configs
+        assertTrue(SystemPromptPresets.PRESETS.isNotEmpty())
+        assertEquals("fullstack_web", SystemPromptPresets.findById("fullstack_web")?.id)
+
+        val specialCfg = SessionPromptConfig(
+            mode = SessionMode.SPECIAL,
+            presetId = "fullstack_web",
+            presetTitle = "Full-Stack Web",
+            systemPrompt = "Build a Vite React app."
+        )
+        settings.saveSessionPromptConfig("sess_special_1", specialCfg)
+        val loaded = settings.getSessionPromptConfig("sess_special_1")
+        assertEquals(SessionMode.SPECIAL, loaded?.mode)
+        assertEquals("Build a Vite React app.", loaded?.systemPrompt)
+
+        settings.deleteSessionPromptConfig("sess_special_1")
+        assertEquals(null, settings.getSessionPromptConfig("sess_special_1"))
+    }
+
+    @Test
+    fun `cloud vault restore populates api keys github token custom providers and mcp tokens without echo and clears on sign out`() = runTest {
+        val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        val testCrypto = object : KeystoreCryptoManager() {
+            override suspend fun encrypt(plaintext: String): String =
+                if (plaintext.isEmpty()) "" else "enc:$plaintext"
+
+            override suspend fun decrypt(encoded: String): String =
+                encoded.removePrefix("enc:")
+        }
+        val settings = SettingsDataStore(context, testCrypto, json)
+
+        settings.applyCloudGlobalSettings(
+            themeMode = com.example.domain.model.ThemeMode.LIGHT,
+            defaultProviderId = "custom_synced",
+            defaultModelId = "synced-model-v1",
+            systemPrompt = "Synced system prompt",
+            githubToken = "ghp_synced_device_token",
+            githubDefaultOwner = "ibrahim-dev",
+            githubUserProfileJson = null
+        )
+
+        settings.applyCloudProviderEntries(
+            configs = mapOf(
+                "openai" to com.example.domain.model.ProviderConfig(
+                    providerId = "openai",
+                    baseUrl = "https://api.openai.com/v1",
+                    selectedModel = "gpt-4o",
+                    enabled = true
+                )
+            ),
+            apiKeys = mapOf("openai" to "sk-synced-openai-key")
+        )
+
+        settings.applyCloudCustomProviders(
+            listOf(
+                CustomProviderDefinition(
+                    id = "custom_synced",
+                    displayName = "Synced Custom",
+                    defaultBaseUrl = "https://api.example.com/v1",
+                    defaultModel = "synced-model-v1"
+                )
+            )
+        )
+
+        settings.applyCloudMcpServers(
+            servers = listOf(
+                McpServerConfig(
+                    id = "mcp_synced_1",
+                    name = "Synced MCP",
+                    endpointUrl = "https://mcp.example.com/sse",
+                    enabled = true
+                )
+            ),
+            tokens = mapOf("mcp_synced_1" to "mcp-bearer-token-99")
+        )
+
+        val restoredSettings = settings.getSettings()
+        assertEquals(com.example.domain.model.ThemeMode.LIGHT, restoredSettings.themeMode)
+        assertEquals("custom_synced", restoredSettings.defaultProviderId)
+        assertEquals("Synced system prompt", restoredSettings.systemPrompt)
+        assertEquals("ghp_synced_device_token", settings.getGitHubToken())
+        assertEquals("sk-synced-openai-key", settings.getApiKey("openai"))
+        assertEquals("mcp-bearer-token-99", settings.getMcpAuthToken("mcp_synced_1"))
+        assertEquals(1, settings.getCustomProviders().size)
+        assertEquals(1, settings.getMcpServers().size)
+
+        settings.clearAccountVaultSecretsForSignOut()
+        assertEquals("", settings.getGitHubToken())
+        assertEquals("", settings.getApiKey("openai"))
+        assertEquals("", settings.getMcpAuthToken("mcp_synced_1"))
+        assertTrue(settings.getCustomProviders().isEmpty())
+        assertTrue(settings.getMcpServers().isEmpty())
     }
 }

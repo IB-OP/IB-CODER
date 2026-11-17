@@ -1,0 +1,182 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isStringBounded(val, maxLen) {
+      return val is string && val.size() <= maxLen;
+    }
+
+    function validUserVault(data, userId) {
+      let allowedKeys = [
+        'uid', 'email', 'displayName', 'photoUrl',
+        'themeMode', 'defaultProviderId', 'defaultModelId', 'systemPrompt',
+        'githubToken', 'githubDefaultOwner', 'githubUserProfileJson', 'updatedAt'
+      ];
+      return data.keys().hasOnly(allowedKeys)
+        && data.keys().hasAll(['uid', 'email', 'displayName', 'updatedAt'])
+        && data.uid == userId
+        && isStringBounded(data.email, 320)
+        && isStringBounded(data.displayName, 200)
+        && (!('photoUrl' in data) || isStringBounded(data.photoUrl, 1000))
+        && (!('themeMode' in data) || (data.themeMode in ['DARK', 'LIGHT', 'SYSTEM']))
+        && (!('defaultProviderId' in data) || isStringBounded(data.defaultProviderId, 120))
+        && (!('defaultModelId' in data) || isStringBounded(data.defaultModelId, 240))
+        && (!('systemPrompt' in data) || isStringBounded(data.systemPrompt, 24000))
+        && (!('githubToken' in data) || isStringBounded(data.githubToken, 1024))
+        && (!('githubDefaultOwner' in data) || isStringBounded(data.githubDefaultOwner, 120))
+        && (!('githubUserProfileJson' in data) || isStringBounded(data.githubUserProfileJson, 8000))
+        && data.updatedAt is int && data.updatedAt >= 0;
+    }
+
+    function validProviderVaultEntry(data, providerId) {
+      let allowedKeys = [
+        'providerId', 'apiKey', 'baseUrl', 'selectedModel',
+        'enabled', 'accountId', 'deploymentName', 'fetchedModels', 'updatedAt'
+      ];
+      return data.keys().hasOnly(allowedKeys)
+        && data.keys().hasAll(['providerId', 'updatedAt'])
+        && data.providerId == providerId
+        && isStringBounded(data.providerId, 120)
+        && (!('apiKey' in data) || isStringBounded(data.apiKey, 2048))
+        && (!('baseUrl' in data) || isStringBounded(data.baseUrl, 512))
+        && (!('selectedModel' in data) || isStringBounded(data.selectedModel, 240))
+        && (!('enabled' in data) || data.enabled is bool)
+        && (!('accountId' in data) || isStringBounded(data.accountId, 160))
+        && (!('deploymentName' in data) || isStringBounded(data.deploymentName, 160))
+        && (!('fetchedModels' in data) || (data.fetchedModels is list && data.fetchedModels.size() <= 500))
+        && data.updatedAt is int && data.updatedAt >= 0;
+    }
+
+    function validCustomProvider(data, providerId) {
+      let allowedKeys = [
+        'id', 'displayName', 'defaultBaseUrl', 'signupUrl',
+        'defaultModel', 'requiresApiKey', 'description', 'updatedAt'
+      ];
+      return data.keys().hasOnly(allowedKeys)
+        && data.keys().hasAll(['id', 'displayName', 'defaultBaseUrl', 'updatedAt'])
+        && data.id == providerId
+        && isStringBounded(data.id, 120)
+        && isStringBounded(data.displayName, 120)
+        && data.displayName.size() > 0
+        && isStringBounded(data.defaultBaseUrl, 512)
+        && (!('signupUrl' in data) || isStringBounded(data.signupUrl, 512))
+        && (!('defaultModel' in data) || isStringBounded(data.defaultModel, 240))
+        && (!('requiresApiKey' in data) || data.requiresApiKey is bool)
+        && (!('description' in data) || isStringBounded(data.description, 1000))
+        && data.updatedAt is int && data.updatedAt >= 0;
+    }
+
+    function validMcpServer(data, serverId) {
+      let allowedKeys = [
+        'id', 'name', 'endpointUrl', 'transport',
+        'authHeaderName', 'enabled', 'authToken', 'updatedAt'
+      ];
+      return data.keys().hasOnly(allowedKeys)
+        && data.keys().hasAll(['id', 'name', 'endpointUrl', 'updatedAt'])
+        && data.id == serverId
+        && isStringBounded(data.id, 120)
+        && isStringBounded(data.name, 160)
+        && isStringBounded(data.endpointUrl, 512)
+        && (!('transport' in data) || (data.transport in ['AUTO', 'STREAMABLE_HTTP', 'LEGACY_SSE']))
+        && (!('authHeaderName' in data) || isStringBounded(data.authHeaderName, 120))
+        && (!('enabled' in data) || data.enabled is bool)
+        && (!('authToken' in data) || isStringBounded(data.authToken, 2048))
+        && data.updatedAt is int && data.updatedAt >= 0;
+    }
+
+    function validGitHubProject(data, projectId) {
+      let allowedKeys = [
+        'projectId', 'owner', 'repo', 'branch',
+        'isPrivate', 'createIfMissing', 'includeApkWorkflow',
+        'autoSyncEnabled', 'autoFixWorkflowBugs', 'directGitHubMode', 'updatedAt'
+      ];
+      return data.keys().hasOnly(allowedKeys)
+        && data.keys().hasAll(['projectId', 'owner', 'repo', 'updatedAt'])
+        && data.projectId == projectId
+        && isStringBounded(data.projectId, 120)
+        && isStringBounded(data.owner, 120)
+        && isStringBounded(data.repo, 200)
+        && (!('branch' in data) || isStringBounded(data.branch, 160))
+        && (!('isPrivate' in data) || data.isPrivate is bool)
+        && (!('createIfMissing' in data) || data.createIfMissing is bool)
+        && (!('includeApkWorkflow' in data) || data.includeApkWorkflow is bool)
+        && (!('autoSyncEnabled' in data) || data.autoSyncEnabled is bool)
+        && (!('autoFixWorkflowBugs' in data) || data.autoFixWorkflowBugs is bool)
+        && (!('directGitHubMode' in data) || data.directGitHubMode is bool)
+        && data.updatedAt is int && data.updatedAt >= 0;
+    }
+
+    function validSessionConfig(data, sessionId) {
+      let allowedKeys = [
+        'sessionId', 'mode', 'presetId', 'presetTitle', 'systemPrompt', 'updatedAt'
+      ];
+      return data.keys().hasOnly(allowedKeys)
+        && data.keys().hasAll(['sessionId', 'mode', 'systemPrompt', 'updatedAt'])
+        && data.sessionId == sessionId
+        && isStringBounded(data.sessionId, 120)
+        && (data.mode in ['NORMAL', 'SPECIAL'])
+        && (!('presetId' in data) || isStringBounded(data.presetId, 120))
+        && (!('presetTitle' in data) || isStringBounded(data.presetTitle, 160))
+        && isStringBounded(data.systemPrompt, 24000)
+        && data.updatedAt is int && data.updatedAt >= 0;
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && validUserVault(request.resource.data, userId);
+      allow update: if isOwner(userId)
+        && request.resource.data.uid == resource.data.uid
+        && validUserVault(request.resource.data, userId);
+      allow delete: if isOwner(userId);
+
+      match /providerKeys/{providerId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && validProviderVaultEntry(request.resource.data, providerId);
+        allow update: if isOwner(userId) && validProviderVaultEntry(request.resource.data, providerId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /customProviders/{providerId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && validCustomProvider(request.resource.data, providerId);
+        allow update: if isOwner(userId) && validCustomProvider(request.resource.data, providerId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /mcpServers/{serverId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && validMcpServer(request.resource.data, serverId);
+        allow update: if isOwner(userId) && validMcpServer(request.resource.data, serverId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /githubProjects/{projectId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && validGitHubProject(request.resource.data, projectId);
+        allow update: if isOwner(userId) && validGitHubProject(request.resource.data, projectId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /sessionConfigs/{sessionId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && validSessionConfig(request.resource.data, sessionId);
+        allow update: if isOwner(userId) && validSessionConfig(request.resource.data, sessionId);
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // Default deny for everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

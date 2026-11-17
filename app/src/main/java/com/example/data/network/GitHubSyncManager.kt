@@ -1,12 +1,16 @@
 package com.example.data.network
 
 import com.example.data.preferences.SettingsDataStore
+import com.example.data.workspace.WorkspaceManager
 import com.example.domain.model.GitHubProjectConfig
 import com.example.domain.model.GitHubPushResult
+import com.example.domain.model.GitHubRepositorySummary
 import com.example.domain.model.GitHubSyncStatus
 import com.example.domain.model.GitHubWorkflowJobLog
 import com.example.domain.model.GitHubWorkflowRunSummary
 import com.example.domain.model.WorkflowFailureAlert
+import com.example.domain.model.WorkspaceProject
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -49,9 +53,10 @@ class GitHubSyncManager(
             val token = settingsDataStore.getGitHubToken()
             if (token.isBlank()) return@launch
 
+            val shouldImmediate = immediate || cfg.directGitHubMode
             pendingJobs[projectId]?.cancel()
             pendingJobs[projectId] = scope.launch {
-                if (!immediate) {
+                if (!shouldImmediate) {
                     delay(1500)
                 }
                 performSync(projectId, cfg, token, commitReason)
@@ -222,6 +227,146 @@ class GitHubSyncManager(
             }
             appendLine("Use workspace tools to inspect the relevant workflow YAML, Gradle files, or source code, fix the root cause with write_file/edit_file, and summarize the fix clearly.")
         }
+    }
+
+    suspend fun listRepositories(): Result<List<GitHubRepositorySummary>> {
+        val token = settingsDataStore.getGitHubToken().trim()
+        if (token.isBlank()) {
+            return Result.failure(IllegalStateException("Sign in to GitHub first."))
+        }
+        return gitHubPushClient.listRepositories(token)
+    }
+
+    suspend fun createDirectGitHubProject(
+        workspaceManager: WorkspaceManager,
+        ownerInput: String,
+        repoInput: String,
+        branchInput: String,
+        isPrivate: Boolean,
+        createNewRepo: Boolean,
+        includeApkWorkflow: Boolean,
+        autoFixWorkflowBugs: Boolean
+    ): Result<WorkspaceProject> = runCatching {
+        val token = settingsDataStore.getGitHubToken().trim()
+        require(token.isNotEmpty()) { "Sign in to GitHub first." }
+
+        val cleanRepo = repoInput.trim()
+            .replace(Regex("\\s+"), "-")
+            .replace(Regex("[^A-Za-z0-9._-]"), "-")
+            .trim('-')
+        require(cleanRepo.isNotEmpty()) { "Repository name is required." }
+
+        val cleanBranch = branchInput.trim().ifBlank { "main" }
+        val resolvedOwner = ownerInput.trim().ifBlank {
+            settingsDataStore.githubDefaultOwnerFlow.first().trim()
+        }.ifBlank {
+            gitHubPushClient.verifyToken(token).getOrThrow().login
+        }
+
+        val repoSummary = if (createNewRepo) {
+            gitHubPushClient.createRepository(
+                token = token,
+                name = cleanRepo,
+                description = "Managed directly from IB CODER",
+                isPrivate = isPrivate,
+                autoInit = true
+            ).getOrThrow()
+        } else {
+            null
+        }
+
+        val finalOwner = repoSummary?.ownerLogin?.ifBlank { resolvedOwner } ?: resolvedOwner
+        val finalRepo = repoSummary?.name?.ifBlank { cleanRepo } ?: cleanRepo
+        val cloneRef = if (createNewRepo) {
+            repoSummary?.defaultBranch?.ifBlank { "main" } ?: "main"
+        } else {
+            cleanBranch
+        }
+
+        val project = gitHubPushClient.cloneOrPullRepository(
+            token = token,
+            owner = finalOwner,
+            repo = finalRepo,
+            branch = cloneRef
+        ).getOrThrow()
+
+        var pushedCommitSha = ""
+        if (createNewRepo && includeApkWorkflow) {
+            val pushRes = gitHubPushClient.pushProject(
+                projectId = project.id,
+                token = token,
+                ownerInput = finalOwner,
+                repoInput = finalRepo,
+                branchInput = cleanBranch,
+                commitMessageInput = "Initialize IB CODER project on $cleanBranch",
+                isPrivate = isPrivate,
+                createIfMissing = true,
+                includeApkWorkflow = true
+            ).getOrThrow()
+            pushedCommitSha = pushRes.commitSha
+        }
+
+        val repoUrl = repoSummary?.htmlUrl?.ifBlank { null }
+            ?: "https://github.com/$finalOwner/$finalRepo"
+        settingsDataStore.saveGitHubProjectConfig(
+            project.id,
+            GitHubProjectConfig(
+                owner = finalOwner,
+                repo = finalRepo,
+                branch = cleanBranch,
+                isPrivate = repoSummary?.isPrivate ?: isPrivate,
+                createIfMissing = true,
+                includeApkWorkflow = includeApkWorkflow,
+                autoSyncEnabled = true,
+                autoFixWorkflowBugs = autoFixWorkflowBugs,
+                directGitHubMode = true,
+                lastCommitSha = pushedCommitSha,
+                lastRepoUrl = repoUrl,
+                lastActionsUrl = "$repoUrl/actions",
+                lastPushedAt = if (pushedCommitSha.isNotBlank()) System.currentTimeMillis() else 0L
+            )
+        )
+        settingsDataStore.setActiveProjectId(project.id)
+        if (pushedCommitSha.isNotBlank()) {
+            updateStatus(project.id, GitHubSyncStatus.Synced(pushedCommitSha, System.currentTimeMillis(), 1))
+        }
+        project
+    }
+
+    suspend fun pullFromGitHub(projectId: String): Result<WorkspaceProject> {
+        val cfg = settingsDataStore.getGitHubProjectConfig(projectId)
+            ?: return Result.failure(IllegalStateException("This workspace is not linked to a GitHub repository yet."))
+        if (cfg.owner.isBlank() || cfg.repo.isBlank()) {
+            return Result.failure(IllegalStateException("GitHub owner/repository is not configured."))
+        }
+        val token = settingsDataStore.getGitHubToken().trim()
+        if (token.isBlank()) {
+            return Result.failure(IllegalStateException("Sign in to GitHub first."))
+        }
+        val branch = cfg.branch.ifBlank { "main" }
+        updateStatus(projectId, GitHubSyncStatus.Syncing("Pulling '$branch' from ${cfg.owner}/${cfg.repo}..."))
+        return gitHubPushClient.cloneOrPullRepository(
+            token = token,
+            owner = cfg.owner,
+            repo = cfg.repo,
+            branch = branch,
+            existingProjectId = projectId
+        ).onSuccess {
+            updateStatus(projectId, GitHubSyncStatus.Idle)
+        }.onFailure { err ->
+            updateStatus(projectId, GitHubSyncStatus.Error(err.message ?: "Pull from GitHub failed."))
+        }
+    }
+
+    suspend fun setDirectGitHubMode(projectId: String, enabled: Boolean) {
+        val cur = settingsDataStore.getGitHubProjectConfig(projectId) ?: return
+        settingsDataStore.saveGitHubProjectConfig(
+            projectId,
+            cur.copy(
+                directGitHubMode = enabled,
+                autoSyncEnabled = if (enabled) true else cur.autoSyncEnabled
+            )
+        )
     }
 
     private fun updateStatus(projectId: String, status: GitHubSyncStatus) {

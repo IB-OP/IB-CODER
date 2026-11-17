@@ -1,5 +1,6 @@
 package com.example.ui.screens.chat
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -13,13 +14,17 @@ import com.example.data.workspace.WorkspaceManager
 import com.example.domain.model.ChatMessageUi
 import com.example.domain.model.ChatSession
 import com.example.domain.model.GitHubProjectConfig
+import com.example.domain.model.GitHubRepositorySummary
 import com.example.domain.model.GitHubSyncStatus
 import com.example.domain.model.PendingDeletionConfirmation
 import com.example.domain.model.ProviderConfig
 import com.example.domain.model.ProviderMetadata
+import com.example.domain.model.SessionMode
+import com.example.domain.model.SessionPromptConfig
 import com.example.domain.model.ToolSupportStatus
 import com.example.domain.model.WorkflowFailureAlert
 import com.example.domain.model.WorkspaceProject
+import com.example.domain.prompt.SystemPromptPresets
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -40,9 +45,11 @@ data class ProviderOptionUi(
 
 data class ChatUiState(
     val currentSession: ChatSession? = null,
+    val currentSessionPrompt: SessionPromptConfig? = null,
     val messages: List<ChatMessageUi> = emptyList(),
     val streamingMessage: ChatMessageUi? = null,
     val isGenerating: Boolean = false,
+    val isCreatingProject: Boolean = false,
     val activeProject: WorkspaceProject? = null,
     val allProjects: List<WorkspaceProject> = emptyList(),
     val selectedProviderId: String = "coarena",
@@ -51,6 +58,10 @@ data class ChatUiState(
     val toolSupportStatus: ToolSupportStatus = ToolSupportStatus.SUPPORTED,
     val mcpEnabledServerCount: Int = 0,
     val mcpToolCount: Int = 0,
+    val isGitHubSignedIn: Boolean = false,
+    val defaultGitHubOwner: String = "",
+    val availableGitHubRepos: List<GitHubRepositorySummary> = emptyList(),
+    val isLoadingGitHubRepos: Boolean = false,
     val activeGitHubConfig: GitHubProjectConfig? = null,
     val activeSyncStatus: GitHubSyncStatus = GitHubSyncStatus.Idle,
     val pendingWorkflowAlert: WorkflowFailureAlert? = null,
@@ -71,10 +82,13 @@ class ChatViewModel(
 
     private val streamingMessage = MutableStateFlow<ChatMessageUi?>(null)
     private val isGenerating = MutableStateFlow(false)
+    private val isCreatingProject = MutableStateFlow(false)
     private val selectedProviderOverride = MutableStateFlow<String?>(null)
     private val selectedModelOverride = MutableStateFlow<String?>(null)
     private val pendingDeletion = MutableStateFlow<PendingDeletionConfirmation?>(null)
     private val pendingWorkflowAlert = MutableStateFlow<WorkflowFailureAlert?>(null)
+    private val availableGitHubRepos = MutableStateFlow<List<GitHubRepositorySummary>>(emptyList())
+    private val isLoadingGitHubRepos = MutableStateFlow(false)
     private val errorBanner = MutableStateFlow<String?>(null)
 
     private var activeGenerationJob: Job? = null
@@ -136,12 +150,31 @@ class ChatViewModel(
                 )
             }
 
+            val githubAuthFlow = combine(
+                settingsDataStore.hasGitHubTokenFlow,
+                settingsDataStore.githubDefaultOwnerFlow,
+                availableGitHubRepos,
+                isLoadingGitHubRepos,
+                isCreatingProject
+            ) { signedIn, defOwner, repos, loadingRepos, creating ->
+                GitHubCatalogBundle(signedIn, defOwner, repos, loadingRepos, creating)
+            }
+
+            val githubCatalogBundleFlow = combine(
+                githubAuthFlow,
+                settingsDataStore.sessionPromptConfigsFlow,
+                providerRegistry.customAdaptersFlow
+            ) { catalog, promptMap, _ ->
+                catalog to promptMap
+            }
+
             val githubBundleFlow = combine(
                 settingsDataStore.githubProjectConfigsFlow,
                 gitHubSyncManager.syncStatuses,
-                pendingWorkflowAlert
-            ) { ghConfigs, syncStatuses, alert ->
-                Triple(ghConfigs, syncStatuses, alert)
+                pendingWorkflowAlert,
+                githubCatalogBundleFlow
+            ) { ghConfigs, syncStatuses, alert, catalogPair ->
+                GitHubFullBundle(ghConfigs, syncStatuses, alert, catalogPair.first, catalogPair.second)
             }
 
             combine(sessionBundleFlow, workspaceBundleFlow, overrideBundleFlow, githubBundleFlow) { sBundle, wBundle, oBundle, ghBundle ->
@@ -156,7 +189,7 @@ class ChatViewModel(
                     ?: config?.selectedModel?.takeIf { it.isNotBlank() }
                     ?: wBundle.defaultModelId
 
-                val options = providerRegistry.adapters.map { ad ->
+                val options = providerRegistry.allAdapters().map { ad ->
                     val cfg = wBundle.configs[ad.metadata.id] ?: ad.defaultConfig()
                     ProviderOptionUi(
                         metadata = ad.metadata,
@@ -167,14 +200,22 @@ class ChatViewModel(
 
                 val toolStatus = adapter?.modelToolSupport(modelId) ?: ToolSupportStatus.UNKNOWN
                 val activeProjId = wBundle.activeProject?.id
-                val activeGhCfg = activeProjId?.let { ghBundle.first[it] }?.takeIf { it.repo.isNotBlank() }
-                val activeSync = activeProjId?.let { ghBundle.second[it] } ?: GitHubSyncStatus.Idle
+                val activeGhCfg = activeProjId?.let { ghBundle.configs[it] }?.takeIf { it.repo.isNotBlank() }
+                val activeSync = activeProjId?.let { ghBundle.syncStatuses[it] } ?: GitHubSyncStatus.Idle
+                val promptCfg = sBundle.session?.id?.let { ghBundle.promptConfigs[it] }
+                val enrichedSession = if (sBundle.session != null && promptCfg != null) {
+                    sBundle.session.copy(mode = promptCfg.mode, presetTitle = promptCfg.presetTitle)
+                } else {
+                    sBundle.session
+                }
 
                 ChatUiState(
-                    currentSession = sBundle.session,
+                    currentSession = enrichedSession,
+                    currentSessionPrompt = promptCfg,
                     messages = sBundle.messages,
                     streamingMessage = sBundle.streaming,
                     isGenerating = sBundle.generating,
+                    isCreatingProject = ghBundle.catalog.isCreatingProject,
                     activeProject = wBundle.activeProject,
                     allProjects = wBundle.projects,
                     selectedProviderId = providerId,
@@ -183,9 +224,13 @@ class ChatViewModel(
                     toolSupportStatus = toolStatus,
                     mcpEnabledServerCount = oBundle.mcpServerCount,
                     mcpToolCount = oBundle.mcpToolCount,
+                    isGitHubSignedIn = ghBundle.catalog.isSignedIn,
+                    defaultGitHubOwner = ghBundle.catalog.defaultOwner,
+                    availableGitHubRepos = ghBundle.catalog.repos,
+                    isLoadingGitHubRepos = ghBundle.catalog.isLoadingRepos,
                     activeGitHubConfig = activeGhCfg,
                     activeSyncStatus = activeSync,
-                    pendingWorkflowAlert = ghBundle.third,
+                    pendingWorkflowAlert = ghBundle.alert,
                     pendingDeletion = oBundle.deletion,
                     errorBanner = oBundle.error
                 )
@@ -205,6 +250,55 @@ class ChatViewModel(
         stopGeneration()
         container.selectedSessionId.value = null
         errorBanner.value = null
+    }
+
+    fun startNewConfiguredSession(
+        mode: SessionMode,
+        presetId: String,
+        presetTitle: String,
+        systemPrompt: String,
+        attachActiveProject: Boolean = mode == SessionMode.SPECIAL
+    ) {
+        stopGeneration()
+        errorBanner.value = null
+        viewModelScope.launch {
+            val currentState = _uiState.value
+            val providerId = currentState.selectedProviderId
+            val modelId = currentState.selectedModelId
+            val projectId = if (attachActiveProject) currentState.activeProject?.id else null
+            val title = if (mode == SessionMode.NORMAL) "Normal Question" else presetTitle
+            val created = chatRepository.createSession(
+                title = title,
+                projectId = projectId,
+                providerId = providerId,
+                modelId = modelId
+            )
+            settingsDataStore.saveSessionPromptConfig(
+                created.id,
+                SessionPromptConfig(
+                    mode = mode,
+                    presetId = presetId,
+                    presetTitle = presetTitle,
+                    systemPrompt = systemPrompt.ifBlank {
+                        if (mode == SessionMode.NORMAL) SystemPromptPresets.NORMAL_QA_PROMPT
+                        else settingsDataStore.getSettings().systemPrompt
+                    }
+                )
+            )
+            container.selectedSessionId.value = created.id
+        }
+    }
+
+    fun updateActiveSessionSystemPrompt(prompt: String) {
+        val sessionId = container.selectedSessionId.value ?: return
+        viewModelScope.launch {
+            val existing = settingsDataStore.getSessionPromptConfig(sessionId)
+                ?: SessionPromptConfig(mode = SessionMode.SPECIAL, presetId = "custom", presetTitle = "Custom Prompt")
+            settingsDataStore.saveSessionPromptConfig(
+                sessionId,
+                existing.copy(systemPrompt = prompt)
+            )
+        }
     }
 
     fun selectProviderAndModel(providerId: String, modelId: String) {
@@ -234,11 +328,77 @@ class ChatViewModel(
 
     fun createProjectAndSelect(name: String) {
         viewModelScope.launch {
-            val created = workspaceManager.createProject(name)
-            settingsDataStore.setActiveProjectId(created.id)
-            container.selectedSessionId.value?.let { sessionId ->
-                chatRepository.updateSessionProject(sessionId, created.id)
+            isCreatingProject.value = true
+            runCatching {
+                val created = workspaceManager.createProject(name)
+                settingsDataStore.setActiveProjectId(created.id)
+                container.selectedSessionId.value?.let { sessionId ->
+                    chatRepository.updateSessionProject(sessionId, created.id)
+                }
+            }.onFailure {
+                errorBanner.value = it.message ?: "Could not create project."
             }
+            isCreatingProject.value = false
+        }
+    }
+
+    fun createProjectFromDeviceFolder(treeUri: Uri) {
+        viewModelScope.launch {
+            isCreatingProject.value = true
+            runCatching {
+                val attached = workspaceManager.attachDeviceFolderProject(treeUri)
+                settingsDataStore.setActiveProjectId(attached.id)
+                container.selectedSessionId.value?.let { sessionId ->
+                    chatRepository.updateSessionProject(sessionId, attached.id)
+                }
+            }.onFailure {
+                errorBanner.value = it.message ?: "Could not open selected device folder."
+            }
+            isCreatingProject.value = false
+        }
+    }
+
+    fun loadGitHubRepositories() {
+        if (isLoadingGitHubRepos.value) return
+        viewModelScope.launch {
+            isLoadingGitHubRepos.value = true
+            gitHubSyncManager.listRepositories().onSuccess { repos ->
+                availableGitHubRepos.value = repos
+            }.onFailure { err ->
+                errorBanner.value = err.message ?: "Could not load GitHub repositories."
+            }
+            isLoadingGitHubRepos.value = false
+        }
+    }
+
+    fun createDirectGitHubProject(
+        owner: String,
+        repo: String,
+        branch: String,
+        isPrivate: Boolean,
+        createNewRepo: Boolean,
+        includeWorkflow: Boolean,
+        autoFixWorkflowBugs: Boolean
+    ) {
+        viewModelScope.launch {
+            isCreatingProject.value = true
+            gitHubSyncManager.createDirectGitHubProject(
+                workspaceManager = workspaceManager,
+                ownerInput = owner,
+                repoInput = repo,
+                branchInput = branch,
+                isPrivate = isPrivate,
+                createNewRepo = createNewRepo,
+                includeApkWorkflow = includeWorkflow,
+                autoFixWorkflowBugs = autoFixWorkflowBugs
+            ).onSuccess { project ->
+                container.selectedSessionId.value?.let { sessionId ->
+                    chatRepository.updateSessionProject(sessionId, project.id)
+                }
+            }.onFailure { err ->
+                errorBanner.value = err.message ?: "Could not open GitHub repository."
+            }
+            isCreatingProject.value = false
         }
     }
 
@@ -375,6 +535,22 @@ class ChatViewModel(
         val error: String?,
         val mcpServerCount: Int,
         val mcpToolCount: Int
+    )
+
+    private data class GitHubCatalogBundle(
+        val isSignedIn: Boolean,
+        val defaultOwner: String,
+        val repos: List<GitHubRepositorySummary>,
+        val isLoadingRepos: Boolean,
+        val isCreatingProject: Boolean
+    )
+
+    private data class GitHubFullBundle(
+        val configs: Map<String, GitHubProjectConfig>,
+        val syncStatuses: Map<String, GitHubSyncStatus>,
+        val alert: WorkflowFailureAlert?,
+        val catalog: GitHubCatalogBundle,
+        val promptConfigs: Map<String, SessionPromptConfig>
     )
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
