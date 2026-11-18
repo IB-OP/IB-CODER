@@ -15,6 +15,7 @@ import com.example.data.network.McpManager
 import com.example.data.network.ProviderRegistry
 import com.example.data.preferences.SettingsDataStore
 import com.example.data.remote.CloudAccountVaultRepository
+import com.example.data.remote.RuntimeFirebaseManager
 import com.example.data.repository.ChatRepository
 import com.example.data.security.KeystoreCryptoManager
 import com.example.data.terminal.TerminalExecutor
@@ -143,6 +144,12 @@ class AppContainer(context: Context) {
     )
 
     init {
+        appScope.launch {
+            val savedFirebase = settingsDataStore.getRuntimeFirebaseConfig()
+            if (savedFirebase != null && RuntimeFirebaseManager.ensureFirebaseInitialized(appContext, savedFirebase)) {
+                cloudAccountVaultRepository.refreshFirebaseBindings()
+            }
+        }
         appScope.launch {
             settingsDataStore.customProvidersFlow.collect { customDefs ->
                 providerRegistry.syncCustomProviders(customDefs)

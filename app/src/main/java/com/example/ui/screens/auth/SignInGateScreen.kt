@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -35,7 +36,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,20 +75,37 @@ fun SignInGateScreen(
 
     var isBusy by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var isFirebaseConfigMissing by remember { mutableStateOf(false) }
+    var showImportDialog by remember { mutableStateOf(false) }
+    var configBanner by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        isFirebaseConfigMissing = !isGoogleSignInConfigured(context, container.settingsDataStore)
+    }
 
     fun launchInteractiveGoogleSignIn() {
         scope.launch {
             isBusy = true
             errorMessage = null
+            configBanner = null
             when (
                 val outcome = performInteractiveGoogleSignIn(
                     context = context,
                     credentialManager = credentialManager,
-                    cloudAccountVaultRepository = container.cloudAccountVaultRepository
+                    cloudAccountVaultRepository = container.cloudAccountVaultRepository,
+                    settingsDataStore = container.settingsDataStore
                 )
             ) {
-                GoogleSignInOutcome.Success -> errorMessage = null
+                GoogleSignInOutcome.Success -> {
+                    errorMessage = null
+                    isFirebaseConfigMissing = false
+                }
                 GoogleSignInOutcome.Cancelled -> Unit
+                is GoogleSignInOutcome.MissingConfig -> {
+                    isFirebaseConfigMissing = true
+                    errorMessage = outcome.message
+                    showImportDialog = true
+                }
                 is GoogleSignInOutcome.Error -> errorMessage = outcome.message
             }
             isBusy = false
@@ -97,6 +117,21 @@ fun SignInGateScreen(
             errorMessage = null
             container.settingsDataStore.setGuestMode(true)
         }
+    }
+
+    if (showImportDialog) {
+        FirebaseConfigImportDialog(
+            settingsDataStore = container.settingsDataStore,
+            cloudAccountVaultRepository = container.cloudAccountVaultRepository,
+            json = container.json,
+            onDismiss = { showImportDialog = false },
+            onConfigured = {
+                showImportDialog = false
+                isFirebaseConfigMissing = false
+                errorMessage = null
+                configBanner = "Firebase initialized. Tap 'Sign in with Google' to continue."
+            }
+        )
     }
 
     Surface(
@@ -153,6 +188,23 @@ fun SignInGateScreen(
                     textAlign = TextAlign.Center
                 )
 
+                configBanner?.let { notice ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        shape = RoundedCornerShape(4.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = notice,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = JetBrainsMonoFamily,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+
                 errorMessage?.let { err ->
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
@@ -160,13 +212,57 @@ fun SignInGateScreen(
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            text = err,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = JetBrainsMonoFamily,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.padding(12.dp)
-                        )
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = err,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = JetBrainsMonoFamily,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            if (isFirebaseConfigMissing) {
+                                TextButton(
+                                    onClick = { showImportDialog = true },
+                                    modifier = Modifier.testTag("gate_import_firebase_button")
+                                ) {
+                                    Icon(Icons.Rounded.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Import google-services.json")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (isFirebaseConfigMissing && errorMessage == null) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(4.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Built without google-services.json? Import config or use Guest Mode.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(
+                                onClick = { showImportDialog = true },
+                                modifier = Modifier.testTag("gate_configure_firebase_button")
+                            ) {
+                                Text("Configure")
+                            }
+                        }
                     }
                 }
 

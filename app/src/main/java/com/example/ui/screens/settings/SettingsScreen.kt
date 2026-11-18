@@ -72,11 +72,13 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.AppContainer
 import com.example.BuildConfig
 import com.example.R
 import com.example.data.remote.CloudVaultSyncStatus
 import com.example.domain.model.ThemeMode
 import com.example.ui.components.CyberWindowPanel
+import com.example.ui.screens.auth.FirebaseConfigImportDialog
 import com.example.ui.theme.JetBrainsMonoFamily
 import com.example.ui.theme.SilkscreenFamily
 
@@ -87,10 +89,21 @@ fun SettingsScreen(
     onOpenProviders: () -> Unit,
     onOpenMcpServers: () -> Unit,
     onOpenGitHub: () -> Unit = {},
-    onOpenSidebar: (() -> Unit)? = null
+    onOpenSidebar: (() -> Unit)? = null,
+    container: AppContainer? = null
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    if (state.showFirebaseConfigDialog && container != null) {
+        FirebaseConfigImportDialog(
+            settingsDataStore = container.settingsDataStore,
+            cloudAccountVaultRepository = container.cloudAccountVaultRepository,
+            json = container.json,
+            onDismiss = viewModel::dismissFirebaseConfigDialog,
+            onConfigured = viewModel::onFirebaseConfigImported
+        )
+    }
     var promptDraft by remember(state.settings.systemPrompt) {
         mutableStateOf(state.settings.systemPrompt)
     }

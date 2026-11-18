@@ -38,7 +38,8 @@ data class SettingsUiState(
     val gitHubDefaultOwner: String = "",
     val gitHubStatusMessage: String? = null,
     val gitHubVerifying: Boolean = false,
-    val savedBanner: String? = null
+    val savedBanner: String? = null,
+    val showFirebaseConfigDialog: Boolean = false
 )
 
 class SettingsViewModel(
@@ -53,6 +54,7 @@ class SettingsViewModel(
     private val gitHubStatusState = MutableStateFlow<String?>(null)
     private val gitHubVerifyingState = MutableStateFlow(false)
     private val isSigningInState = MutableStateFlow(false)
+    private val showFirebaseConfigDialogState = MutableStateFlow(false)
 
     private val _uiState = MutableStateFlow(
         SettingsUiState(providers = providerRegistry.allAdapters().map { it.metadata })
@@ -96,9 +98,10 @@ class SettingsViewModel(
                 settingsDataStore.appAccountSessionFlow,
                 settingsDataStore.guestModeFlow,
                 cloudAccountVaultRepository.syncStatus,
-                isSigningInState
-            ) { session, guestMode, syncStatus, signingIn ->
-                AccountBundle(session, guestMode, syncStatus, signingIn)
+                isSigningInState,
+                showFirebaseConfigDialogState
+            ) { session, guestMode, syncStatus, signingIn, showFbDialog ->
+                AccountBundle(session, guestMode, syncStatus, signingIn, showFbDialog)
             }
 
             combine(baseFlow, gitHubFlow, accountFlow, providerRegistry.customAdaptersFlow) { b, gh, acct, _ ->
@@ -116,7 +119,8 @@ class SettingsViewModel(
                     gitHubDefaultOwner = gh.owner,
                     gitHubStatusMessage = gh.status,
                     gitHubVerifying = gh.verifying,
-                    savedBanner = b.banner
+                    savedBanner = b.banner,
+                    showFirebaseConfigDialog = acct.showFbDialog
                 )
             }.collect { state ->
                 _uiState.value = state
@@ -132,19 +136,33 @@ class SettingsViewModel(
                 val res = performInteractiveGoogleSignIn(
                     context = context,
                     credentialManager = cm,
-                    cloudAccountVaultRepository = cloudAccountVaultRepository
+                    cloudAccountVaultRepository = cloudAccountVaultRepository,
+                    settingsDataStore = settingsDataStore
                 )
             ) {
                 GoogleSignInOutcome.Success -> {
                     savedBanner.value = "Signed in with Google. Cloud Vault sync started."
                 }
                 GoogleSignInOutcome.Cancelled -> Unit
+                is GoogleSignInOutcome.MissingConfig -> {
+                    savedBanner.value = res.message
+                    showFirebaseConfigDialogState.value = true
+                }
                 is GoogleSignInOutcome.Error -> {
                     savedBanner.value = res.message
                 }
             }
             isSigningInState.value = false
         }
+    }
+
+    fun dismissFirebaseConfigDialog() {
+        showFirebaseConfigDialogState.value = false
+    }
+
+    fun onFirebaseConfigImported() {
+        showFirebaseConfigDialogState.value = false
+        savedBanner.value = "Firebase config saved. Tap 'Sign in Google' to sign in."
     }
 
     fun exitGuestMode() {
@@ -228,6 +246,10 @@ class SettingsViewModel(
         }
     }
 
+    fun openFirebaseConfigDialog() {
+        showFirebaseConfigDialogState.value = true
+    }
+
     fun clearBanner() {
         savedBanner.value = null
     }
@@ -251,7 +273,8 @@ class SettingsViewModel(
         val session: AppAccountSession,
         val guestMode: Boolean,
         val syncStatus: CloudVaultSyncStatus,
-        val signingIn: Boolean
+        val signingIn: Boolean,
+        val showFbDialog: Boolean
     )
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {

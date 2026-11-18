@@ -61,14 +61,34 @@ class CloudAccountVaultRepository(
 ) {
     private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private val auth: FirebaseAuth? by lazy {
-        runCatching { Firebase.auth }.getOrNull()
+    @Volatile
+    private var attachedAuth: FirebaseAuth? = null
+
+    private val authStateListener = FirebaseAuth.AuthStateListener { fa ->
+        _authState.value = fa.currentUser
     }
 
-    private val firestore: FirebaseFirestore? by lazy {
-        runCatching {
-            val dbId = context.getString(R.string.firestore_database_id)
-            FirebaseFirestore.getInstance(dbId)
+    private fun currentAuth(): FirebaseAuth? {
+        attachedAuth?.let { return it }
+        return synchronized(this) {
+            attachedAuth ?: runCatching { Firebase.auth }.getOrNull()?.also { fa ->
+                fa.addAuthStateListener(authStateListener)
+                attachedAuth = fa
+                _authState.value = fa.currentUser
+            }
+        }
+    }
+
+    private fun currentFirestore(): FirebaseFirestore? {
+        return runCatching {
+            val dbId = runCatching { context.getString(R.string.firestore_database_id) }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() }
+            if (dbId != null) {
+                FirebaseFirestore.getInstance(dbId)
+            } else {
+                FirebaseFirestore.getInstance()
+            }
         }.getOrNull()
     }
 
@@ -79,21 +99,22 @@ class CloudAccountVaultRepository(
     private var mutationObserverJob: Job? = null
     private var activeUid: String? = null
 
-    private val _authState = MutableStateFlow(auth?.currentUser)
+    private val _authState = MutableStateFlow<FirebaseUser?>(null)
     val authState: StateFlow<FirebaseUser?> = _authState.asStateFlow()
 
-    private val authStateListener = FirebaseAuth.AuthStateListener { fa ->
-        _authState.value = fa.currentUser
+    init {
+        refreshFirebaseBindings()
     }
 
-    init {
-        auth?.addAuthStateListener(authStateListener)
+    fun refreshFirebaseBindings() {
+        currentAuth()
     }
 
     fun authStateFlow(): Flow<FirebaseUser?> = authState
 
     suspend fun signInWithGoogleIdToken(idToken: String): Result<FirebaseUser> {
-        val firebaseAuth = auth ?: return Result.failure(IllegalStateException("Firebase Auth is not initialized."))
+        val firebaseAuth = currentAuth()
+            ?: return Result.failure(IllegalStateException("Firebase Auth is not initialized."))
         return try {
             val credential = GoogleAuthProvider.getCredential(idToken, null)
             val result = firebaseAuth.signInWithCredential(credential).await()
@@ -110,7 +131,8 @@ class CloudAccountVaultRepository(
     }
 
     suspend fun startSyncForUser(user: FirebaseUser): Result<Unit> {
-        val db = firestore ?: return Result.failure(IllegalStateException("Cloud Firestore is unavailable."))
+        val db = currentFirestore()
+            ?: return Result.failure(IllegalStateException("Cloud Firestore is unavailable."))
         if (activeUid == user.uid && mutationObserverJob?.isActive == true) {
             return Result.success(Unit)
         }
@@ -135,8 +157,10 @@ class CloudAccountVaultRepository(
     }
 
     suspend fun syncNow(): Result<Unit> {
-        val user = auth?.currentUser ?: return Result.failure(IllegalStateException("Not signed in."))
-        val db = firestore ?: return Result.failure(IllegalStateException("Cloud Firestore is unavailable."))
+        val user = currentAuth()?.currentUser
+            ?: return Result.failure(IllegalStateException("Not signed in."))
+        val db = currentFirestore()
+            ?: return Result.failure(IllegalStateException("Cloud Firestore is unavailable."))
         return try {
             _syncStatus.value = CloudVaultSyncStatus.Syncing("Syncing API keys, tokens & settings...")
             pushAllLocalToCloud(db, user)
@@ -163,7 +187,7 @@ class CloudAccountVaultRepository(
             runCatching {
                 credentialManager.clearCredentialState(ClearCredentialStateRequest())
             }
-            auth?.signOut()
+            currentAuth()?.signOut()
             _authState.value = null
             settingsDataStore.setGuestMode(false)
             if (clearLocalVaultSecrets) {
@@ -412,7 +436,7 @@ class CloudAccountVaultRepository(
         mutationObserverJob?.cancel()
         mutationObserverJob = repoScope.launch {
             settingsDataStore.cloudVaultMutations.collect { event ->
-                val currentUser = auth?.currentUser
+                val currentUser = currentAuth()?.currentUser
                 if (currentUser == null || currentUser.uid != user.uid) return@collect
                 try {
                     when (event) {

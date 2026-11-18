@@ -112,6 +112,7 @@ import com.example.ui.navigation.SessionsRoute
 import com.example.ui.navigation.SettingsRoute
 import com.example.ui.navigation.TerminalRoute
 import com.example.ui.navigation.WorkspaceRoute
+import com.example.ui.screens.auth.FirebaseConfigImportDialog
 import com.example.ui.screens.auth.GoogleSignInOutcome
 import com.example.ui.screens.auth.SignInGateScreen
 import com.example.ui.screens.auth.performInteractiveGoogleSignIn
@@ -217,6 +218,31 @@ private fun AuthenticatedAiCoderShell(
     val cloudSyncStatus by container.cloudAccountVaultRepository.syncStatus.collectAsStateWithLifecycle()
 
     var drawerSignInBusy by remember { mutableStateOf(false) }
+    var showDrawerFirebaseImportDialog by remember { mutableStateOf(false) }
+    var drawerSignInError by remember { mutableStateOf<String?>(null) }
+
+    if (showDrawerFirebaseImportDialog) {
+        FirebaseConfigImportDialog(
+            settingsDataStore = container.settingsDataStore,
+            cloudAccountVaultRepository = container.cloudAccountVaultRepository,
+            json = container.json,
+            onDismiss = { showDrawerFirebaseImportDialog = false },
+            onConfigured = { showDrawerFirebaseImportDialog = false }
+        )
+    }
+
+    drawerSignInError?.let { errMsg ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { drawerSignInError = null },
+            title = { Text("Google Sign-In") },
+            text = { Text(errMsg) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { drawerSignInError = null }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
 
     fun navigateTopLevel(route: Any) {
         navController.navigate(route) {
@@ -407,7 +433,8 @@ private fun AuthenticatedAiCoderShell(
                     onOpenProviders = { navController.navigate(ProvidersRoute) },
                     onOpenMcpServers = { navController.navigate(McpServersRoute) },
                     onOpenGitHub = { navigateTopLevel(GitHubRoute) },
-                    onOpenSidebar = onOpenSidebar
+                    onOpenSidebar = onOpenSidebar,
+                    container = container
                 )
             }
             composable<DeviceControlRoute> {
@@ -424,15 +451,23 @@ private fun AuthenticatedAiCoderShell(
         scope.launch {
             drawerSignInBusy = true
             when (
-                performInteractiveGoogleSignIn(
+                val res = performInteractiveGoogleSignIn(
                     context = context,
                     credentialManager = credentialManager,
-                    cloudAccountVaultRepository = container.cloudAccountVaultRepository
+                    cloudAccountVaultRepository = container.cloudAccountVaultRepository,
+                    settingsDataStore = container.settingsDataStore
                 )
             ) {
                 GoogleSignInOutcome.Success -> drawerState.close()
-                GoogleSignInOutcome.Cancelled,
-                is GoogleSignInOutcome.Error -> Unit
+                GoogleSignInOutcome.Cancelled -> Unit
+                is GoogleSignInOutcome.MissingConfig -> {
+                    drawerState.close()
+                    showDrawerFirebaseImportDialog = true
+                }
+                is GoogleSignInOutcome.Error -> {
+                    drawerState.close()
+                    drawerSignInError = res.message
+                }
             }
             drawerSignInBusy = false
         }

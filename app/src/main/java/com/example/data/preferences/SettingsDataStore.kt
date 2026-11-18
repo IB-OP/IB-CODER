@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.data.remote.RuntimeFirebaseConfig
 import com.example.data.security.KeystoreCryptoManager
 import com.example.domain.model.AppAccountSession
 import com.example.domain.model.AppSettings
@@ -74,6 +75,7 @@ class SettingsDataStore(
         val PREFERRED_PRIVILEGE_BACKEND = stringPreferencesKey("preferred_privilege_backend")
         val AI_PHONE_CONTROL_ENABLED = booleanPreferencesKey("ai_phone_control_enabled")
         val CONFIRM_SENSITIVE_DEVICE_ACTIONS = booleanPreferencesKey("confirm_sensitive_device_actions")
+        val RUNTIME_FIREBASE_CONFIG = stringPreferencesKey("runtime_firebase_config_enc")
     }
 
     private val _mutations = MutableSharedFlow<CloudVaultMutation>(extraBufferCapacity = 64)
@@ -728,5 +730,28 @@ class SettingsDataStore(
             prefs.remove(Keys.SESSION_PROMPT_CONFIGS)
         }
         saveAppAccountSession(AppAccountSession())
+    }
+
+    val runtimeFirebaseConfigFlow: Flow<RuntimeFirebaseConfig?> = context.secretsStore.data.map { prefs ->
+        val encrypted = prefs[Keys.RUNTIME_FIREBASE_CONFIG] ?: return@map null
+        val decrypted = runCatching { cryptoManager.decrypt(encrypted) }.getOrNull() ?: return@map null
+        runCatching { json.decodeFromString<RuntimeFirebaseConfig>(decrypted) }.getOrNull()
+    }
+
+    suspend fun getRuntimeFirebaseConfig(): RuntimeFirebaseConfig? =
+        runtimeFirebaseConfigFlow.first()
+
+    suspend fun saveRuntimeFirebaseConfig(config: RuntimeFirebaseConfig) {
+        val rawJson = json.encodeToString(config)
+        val encrypted = cryptoManager.encrypt(rawJson)
+        context.secretsStore.edit { prefs ->
+            prefs[Keys.RUNTIME_FIREBASE_CONFIG] = encrypted
+        }
+    }
+
+    suspend fun clearRuntimeFirebaseConfig() {
+        context.secretsStore.edit { prefs ->
+            prefs.remove(Keys.RUNTIME_FIREBASE_CONFIG)
+        }
     }
 }
