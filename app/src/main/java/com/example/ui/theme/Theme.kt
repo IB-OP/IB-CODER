@@ -75,13 +75,13 @@ private val IbCoderLightColorScheme = lightColorScheme(
     onErrorContainer = OnErrorContainerLight
 )
 
-// Crisp, technical IDE geometry matching the reference interface
+// Crisp, technical pixel-window geometry matching cyber-codec styling
 val IbCoderShapes = Shapes(
-    extraSmall = RoundedCornerShape(3.dp),
-    small = RoundedCornerShape(4.dp),
-    medium = RoundedCornerShape(6.dp),
-    large = RoundedCornerShape(8.dp),
-    extraLarge = RoundedCornerShape(12.dp)
+    extraSmall = RoundedCornerShape(2.dp),
+    small = RoundedCornerShape(3.dp),
+    medium = RoundedCornerShape(4.dp),
+    large = RoundedCornerShape(6.dp),
+    extraLarge = RoundedCornerShape(8.dp)
 )
 
 @Composable

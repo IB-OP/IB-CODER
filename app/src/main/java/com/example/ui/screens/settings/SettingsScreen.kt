@@ -76,8 +76,9 @@ import com.example.BuildConfig
 import com.example.R
 import com.example.data.remote.CloudVaultSyncStatus
 import com.example.domain.model.ThemeMode
-import com.example.ui.theme.BrandWordmarkStyle
+import com.example.ui.components.CyberWindowPanel
 import com.example.ui.theme.JetBrainsMonoFamily
+import com.example.ui.theme.SilkscreenFamily
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,7 +113,14 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings & Account Sync", style = MaterialTheme.typography.titleLarge) },
+                title = {
+                    Text(
+                        text = "SETTINGS // VAULT",
+                        fontFamily = SilkscreenFamily,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                },
                 navigationIcon = {
                     if (onOpenSidebar != null) {
                         IconButton(
@@ -162,12 +170,13 @@ fun SettingsScreen(
                     }
                 }
 
-                // Signed-In Account & Cross-Device Cloud Vault Card
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                // Signed-In Account or Guest Mode Card
+                val isGuest = state.isGuestMode && !state.accountSession.isSignedIn
+                CyberWindowPanel(
+                    title = if (isGuest) "ACCOUNT // GUEST_LOCAL" else "ACCOUNT // CLOUD_VAULT",
+                    accentColor = if (isGuest) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                    badgeText = if (isGuest) "OFFLINE" else "SYNC",
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -183,16 +192,20 @@ fun SettingsScreen(
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
                                     .size(48.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(4.dp))
                             )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = state.accountSession.displayName.ifBlank { "IB CODER Account" },
+                                    text = if (isGuest) "Guest Developer (Local Mode)" else state.accountSession.displayName.ifBlank { "IB CODER Account" },
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    text = state.accountSession.username.ifBlank { "Google Account • Cross-Device Sync" },
+                                    text = if (isGuest) {
+                                        "On-device Room + Keystore Vault"
+                                    } else {
+                                        state.accountSession.username.ifBlank { "Google Account • Cross-Device Sync" }
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -200,80 +213,124 @@ fun SettingsScreen(
                             Icon(
                                 Icons.Rounded.AccountCircle,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
+                                tint = if (isGuest) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
                             )
                         }
 
-                        when (val sync = state.cloudSyncStatus) {
-                            is CloudVaultSyncStatus.Syncing -> {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        if (isGuest) {
+                            Text(
+                                text = "You are using IB CODER without signing in. API keys, GitHub tokens, custom providers, and chats are stored locally on this device. Sign in with Google anytime to back up and sync across devices.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = { viewModel.signInWithGoogleFromGuest(context) },
+                                    enabled = !state.isSigningIn,
+                                    shape = RoundedCornerShape(4.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("settings_guest_google_signin_button")
                                 ) {
-                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                    Text(sync.detail, style = MaterialTheme.typography.bodySmall)
+                                    if (state.isSigningIn) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Signing in...")
+                                    } else {
+                                        Icon(Icons.Rounded.AccountCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Sign in Google", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                                OutlinedButton(
+                                    onClick = viewModel::exitGuestMode,
+                                    shape = RoundedCornerShape(4.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("settings_exit_guest_button")
+                                ) {
+                                    Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Exit Guest", maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                             }
-                            is CloudVaultSyncStatus.Synced -> {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Rounded.CloudDone,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                        } else {
+                            when (val sync = state.cloudSyncStatus) {
+                                is CloudVaultSyncStatus.Syncing -> {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                        Text(sync.detail, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                                is CloudVaultSyncStatus.Synced -> {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.CloudDone,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = "Synced to your account: ${sync.syncedKeysCount} API key(s), ${sync.customProvidersCount} custom provider(s), ${sync.mcpCount} MCP server(s)" +
+                                                if (sync.hasGitHubToken) ", GitHub token" else "",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                                is CloudVaultSyncStatus.Error -> {
                                     Text(
-                                        text = "Synced to your account: ${sync.syncedKeysCount} API key(s), ${sync.customProvidersCount} custom provider(s), ${sync.mcpCount} MCP server(s)" +
-                                            if (sync.hasGitHubToken) ", GitHub token" else "",
+                                        text = sync.message,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.primary
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                                CloudVaultSyncStatus.SignedOut -> {
+                                    Text(
+                                        text = "Sign in on any device with the same Google account to restore keys and tokens.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
-                            is CloudVaultSyncStatus.Error -> {
-                                Text(
-                                    text = sync.message,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                            }
-                            CloudVaultSyncStatus.SignedOut -> {
-                                Text(
-                                    text = "Sign in on any device with the same Google account to restore keys and tokens.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = { viewModel.syncAccountVaultNow() },
-                                enabled = state.cloudSyncStatus !is CloudVaultSyncStatus.Syncing,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("settings_cloud_sync_now_button")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Icon(Icons.Rounded.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Sync Now", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            OutlinedButton(
-                                onClick = { viewModel.signOutAccount(context) },
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("settings_sign_out_button")
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Sign Out", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Button(
+                                    onClick = { viewModel.syncAccountVaultNow() },
+                                    enabled = state.cloudSyncStatus !is CloudVaultSyncStatus.Syncing,
+                                    shape = RoundedCornerShape(4.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("settings_cloud_sync_now_button")
+                                ) {
+                                    Icon(Icons.Rounded.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Sync Now", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                OutlinedButton(
+                                    onClick = { viewModel.signOutAccount(context) },
+                                    shape = RoundedCornerShape(4.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("settings_sign_out_button")
+                                ) {
+                                    Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Sign Out", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
                             }
                         }
                     }
@@ -282,7 +339,7 @@ fun SettingsScreen(
                 // Providers & API Keys Entry Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(4.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {
@@ -318,7 +375,7 @@ fun SettingsScreen(
                 // MCP Servers Entry Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(4.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {
@@ -354,7 +411,7 @@ fun SettingsScreen(
                 // GitHub Integration Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(4.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {
@@ -438,7 +495,7 @@ fun SettingsScreen(
                 // Theme Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(4.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {
@@ -473,7 +530,7 @@ fun SettingsScreen(
                 // Default Provider & Model Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(4.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {
@@ -544,7 +601,7 @@ fun SettingsScreen(
                 // Editable System Prompt Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(4.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {
@@ -586,7 +643,7 @@ fun SettingsScreen(
                 // Privacy Policy & Version Info Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(4.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                 ) {

@@ -220,6 +220,7 @@ Open **GitHub Repository → Settings → Secrets and variables → Actions → 
 | `KEYSTORE_PASSWORD` | Keystore store password |
 | `KEY_ALIAS` | Key alias (e.g., `upload`) |
 | `KEY_PASSWORD` | Key password |
+| `GOOGLE_SERVICES_JSON` | *(Optional)* Raw or Base64 contents of `app/google-services.json` if omitted from a public repo |
 
 ### 4. Download Artifacts & Upload to Google Play Console
 1. Bump `APP_VERSION_CODE` and `APP_VERSION_NAME` in `app/build.gradle.kts`.

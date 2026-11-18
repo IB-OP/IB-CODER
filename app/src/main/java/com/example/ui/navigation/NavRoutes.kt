@@ -12,6 +12,9 @@ data object ChatRoute
 data object WorkspaceRoute
 
 @Serializable
+data object TerminalRoute
+
+@Serializable
 data object SessionsRoute
 
 @Serializable

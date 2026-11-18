@@ -31,6 +31,8 @@ import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.CloudSync
@@ -42,6 +44,8 @@ import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
@@ -63,8 +67,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -91,6 +97,8 @@ import androidx.navigation.compose.rememberNavController
 import com.example.AppContainer
 import com.example.R
 import com.example.data.remote.CloudVaultSyncStatus
+import com.example.ui.components.CyberWindowGlyphs
+import com.example.ui.components.cyberScanlineGrid
 import com.example.ui.navigation.ChatRoute
 import com.example.ui.navigation.GitHubRoute
 import com.example.ui.navigation.McpServersRoute
@@ -98,8 +106,11 @@ import com.example.ui.navigation.ProjectsRoute
 import com.example.ui.navigation.ProvidersRoute
 import com.example.ui.navigation.SessionsRoute
 import com.example.ui.navigation.SettingsRoute
+import com.example.ui.navigation.TerminalRoute
 import com.example.ui.navigation.WorkspaceRoute
+import com.example.ui.screens.auth.GoogleSignInOutcome
 import com.example.ui.screens.auth.SignInGateScreen
+import com.example.ui.screens.auth.performInteractiveGoogleSignIn
 import com.example.ui.screens.chat.ChatScreen
 import com.example.ui.screens.chat.ChatViewModel
 import com.example.ui.screens.github.GitHubHubTab
@@ -114,10 +125,13 @@ import com.example.ui.screens.sessions.SessionsScreen
 import com.example.ui.screens.sessions.SessionsViewModel
 import com.example.ui.screens.settings.SettingsScreen
 import com.example.ui.screens.settings.SettingsViewModel
+import com.example.ui.screens.terminal.TerminalScreen
+import com.example.ui.screens.terminal.TerminalViewModel
 import com.example.ui.screens.workspace.WorkspaceScreen
 import com.example.ui.screens.workspace.WorkspaceViewModel
 import com.example.ui.theme.BrandWordmarkStyle
 import com.example.ui.theme.JetBrainsMonoFamily
+import com.example.ui.theme.SilkscreenFamily
 import com.google.firebase.auth.FirebaseUser
 import kotlinx.coroutines.launch
 
@@ -133,20 +147,35 @@ private data class SidebarNavOption(
 @Composable
 fun AiCoderApp(container: AppContainer) {
     val currentUser by container.cloudAccountVaultRepository.authState.collectAsStateWithLifecycle()
+    val guestModeState by container.settingsDataStore.guestModeFlow.collectAsStateWithLifecycle(initialValue = null)
 
     if (currentUser == null) {
-        SignInGateScreen(container = container)
-        return
+        when (guestModeState) {
+            null -> {
+                // Wait a frame for DataStore Guest preference to avoid flashing SignInGateScreen
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {}
+                return
+            }
+            false -> {
+                SignInGateScreen(container = container)
+                return
+            }
+            true -> Unit
+        }
     }
 
-    val signedInUser = currentUser!!
-    key(signedInUser.uid) {
-        LaunchedEffect(signedInUser.uid) {
-            container.cloudAccountVaultRepository.startSyncForUser(signedInUser)
+    val signedInUser = currentUser
+    val isGuestMode = signedInUser == null
+    key(signedInUser?.uid ?: "guest") {
+        LaunchedEffect(signedInUser?.uid) {
+            if (signedInUser != null) {
+                container.cloudAccountVaultRepository.startSyncForUser(signedInUser)
+            }
         }
         AuthenticatedAiCoderShell(
             container = container,
-            user = signedInUser
+            user = signedInUser,
+            isGuestMode = isGuestMode
         )
     }
 }
@@ -154,7 +183,8 @@ fun AiCoderApp(container: AppContainer) {
 @Composable
 private fun AuthenticatedAiCoderShell(
     container: AppContainer,
-    user: FirebaseUser
+    user: FirebaseUser?,
+    isGuestMode: Boolean
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -166,6 +196,7 @@ private fun AuthenticatedAiCoderShell(
 
     val chatViewModel: ChatViewModel = viewModel(factory = ChatViewModel.Factory(container))
     val workspaceViewModel: WorkspaceViewModel = viewModel(factory = WorkspaceViewModel.Factory(container))
+    val terminalViewModel: TerminalViewModel = viewModel(factory = TerminalViewModel.Factory(container))
     val gitHubViewModel: GitHubViewModel = viewModel(factory = GitHubViewModel.Factory(container))
     val sessionsViewModel: SessionsViewModel = viewModel(factory = SessionsViewModel.Factory(container))
     val settingsViewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory(container))
@@ -174,7 +205,10 @@ private fun AuthenticatedAiCoderShell(
 
     val workspaceUiState by workspaceViewModel.uiState.collectAsStateWithLifecycle()
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
+    val terminalUiState by terminalViewModel.uiState.collectAsStateWithLifecycle()
     val cloudSyncStatus by container.cloudAccountVaultRepository.syncStatus.collectAsStateWithLifecycle()
+
+    var drawerSignInBusy by remember { mutableStateOf(false) }
 
     fun navigateTopLevel(route: Any) {
         navController.navigate(route) {
@@ -193,6 +227,14 @@ private fun AuthenticatedAiCoderShell(
             selectedIcon = Icons.Rounded.Code,
             unselectedIcon = Icons.Outlined.Code,
             testTag = "drawer_nav_workspace"
+        ),
+        SidebarNavOption(
+            route = TerminalRoute,
+            label = "Terminal // sh",
+            selectedIcon = Icons.Rounded.Terminal,
+            unselectedIcon = Icons.Outlined.Terminal,
+            badge = if (terminalUiState.session.isRunning) "RUN" else "SH",
+            testTag = "drawer_nav_terminal"
         ),
         SidebarNavOption(
             route = ProjectsRoute,
@@ -263,6 +305,7 @@ private fun AuthenticatedAiCoderShell(
                     viewModel = workspaceViewModel,
                     chatViewModel = chatViewModel,
                     onAskAgent = { navigateTopLevel(ChatRoute) },
+                    onOpenTerminal = { navigateTopLevel(TerminalRoute) },
                     onOpenProviders = { navigateTopLevel(ProvidersRoute) },
                     onOpenMcpServers = { navigateTopLevel(McpServersRoute) },
                     onOpenSettings = { navigateTopLevel(SettingsRoute) },
@@ -270,6 +313,14 @@ private fun AuthenticatedAiCoderShell(
                         gitHubViewModel.selectTab(GitHubHubTab.ACCOUNT)
                         navigateTopLevel(GitHubRoute)
                     },
+                    onOpenSidebar = onOpenSidebar
+                )
+            }
+            composable<TerminalRoute> {
+                TerminalScreen(
+                    viewModel = terminalViewModel,
+                    onWorkspaceMutated = { workspaceViewModel.refreshTree() },
+                    onOpenWorkspace = { navigateTopLevel(WorkspaceRoute) },
                     onOpenSidebar = onOpenSidebar
                 )
             }
@@ -342,6 +393,35 @@ private fun AuthenticatedAiCoderShell(
         }
     }
 
+    val handleSignInClick: () -> Unit = {
+        scope.launch {
+            drawerSignInBusy = true
+            when (
+                performInteractiveGoogleSignIn(
+                    context = context,
+                    credentialManager = credentialManager,
+                    cloudAccountVaultRepository = container.cloudAccountVaultRepository
+                )
+            ) {
+                GoogleSignInOutcome.Success -> drawerState.close()
+                GoogleSignInOutcome.Cancelled,
+                is GoogleSignInOutcome.Error -> Unit
+            }
+            drawerSignInBusy = false
+        }
+    }
+
+    val handleExitOrSignOut: () -> Unit = {
+        scope.launch {
+            drawerState.close()
+            if (isGuestMode) {
+                container.settingsDataStore.setGuestMode(false)
+            } else {
+                container.cloudAccountVaultRepository.signOutAccount(credentialManager)
+            }
+        }
+    }
+
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val usePermanentSidebar = maxWidth >= 840.dp
 
@@ -354,6 +434,8 @@ private fun AuthenticatedAiCoderShell(
                     ) {
                         IbCoderSidebarContent(
                             user = user,
+                            isGuestMode = isGuestMode,
+                            isSigningIn = drawerSignInBusy,
                             activeProjectName = workspaceUiState.activeProject?.name,
                             syncStatus = cloudSyncStatus,
                             currentDestination = currentDestination,
@@ -361,11 +443,8 @@ private fun AuthenticatedAiCoderShell(
                             integrationItems = integrationItems,
                             onSelectRoute = { route -> navigateTopLevel(route) },
                             onSyncNow = { scope.launch { container.cloudAccountVaultRepository.syncNow() } },
-                            onSignOut = {
-                                scope.launch {
-                                    container.cloudAccountVaultRepository.signOutAccount(credentialManager)
-                                }
-                            }
+                            onSignInWithGoogle = handleSignInClick,
+                            onSignOut = handleExitOrSignOut
                         )
                     }
                 }
@@ -382,6 +461,8 @@ private fun AuthenticatedAiCoderShell(
                     ) {
                         IbCoderSidebarContent(
                             user = user,
+                            isGuestMode = isGuestMode,
+                            isSigningIn = drawerSignInBusy,
                             activeProjectName = workspaceUiState.activeProject?.name,
                             syncStatus = cloudSyncStatus,
                             currentDestination = currentDestination,
@@ -394,12 +475,8 @@ private fun AuthenticatedAiCoderShell(
                                 }
                             },
                             onSyncNow = { scope.launch { container.cloudAccountVaultRepository.syncNow() } },
-                            onSignOut = {
-                                scope.launch {
-                                    drawerState.close()
-                                    container.cloudAccountVaultRepository.signOutAccount(credentialManager)
-                                }
-                            }
+                            onSignInWithGoogle = handleSignInClick,
+                            onSignOut = handleExitOrSignOut
                         )
                     }
                 }
@@ -414,7 +491,9 @@ private fun AuthenticatedAiCoderShell(
 
 @Composable
 private fun IbCoderSidebarContent(
-    user: FirebaseUser,
+    user: FirebaseUser?,
+    isGuestMode: Boolean,
+    isSigningIn: Boolean,
     activeProjectName: String?,
     syncStatus: CloudVaultSyncStatus,
     currentDestination: NavDestination?,
@@ -422,23 +501,33 @@ private fun IbCoderSidebarContent(
     integrationItems: List<SidebarNavOption>,
     onSelectRoute: (Any) -> Unit,
     onSyncNow: () -> Unit,
+    onSignInWithGoogle: () -> Unit,
     onSignOut: () -> Unit
 ) {
-    val displayName = user.displayName?.takeIf { it.isNotBlank() }
-        ?: user.email?.substringBefore('@')
-        ?: "Developer"
+    val displayName = if (isGuestMode || user == null) {
+        "Guest Developer"
+    } else {
+        user.displayName?.takeIf { it.isNotBlank() }
+            ?: user.email?.substringBefore('@')
+            ?: "Developer"
+    }
 
     Column(
         modifier = Modifier
             .fillMaxHeight()
+            .cyberScanlineGrid(accentColor = MaterialTheme.colorScheme.primary, scanlineAlpha = 0.03f, gridAlpha = 0.025f)
             .windowInsetsPadding(WindowInsets.systemBars)
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
-        // Brand & Signed-In Account Header Card
+        // Brand & Account Header Card (Cloud Synced or Guest Local)
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainer,
-            shape = RoundedCornerShape(10.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            shape = RoundedCornerShape(4.dp),
+            border = BorderStroke(
+                1.25.dp,
+                if (isGuestMode) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.7f)
+                else MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+            ),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -455,14 +544,23 @@ private fun IbCoderSidebarContent(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .size(40.dp)
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(4.dp))
                     )
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "IB CODER",
-                            style = BrandWordmarkStyle.copy(fontSize = 15.sp),
-                            maxLines = 1
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "IB CODER",
+                                style = BrandWordmarkStyle.copy(fontSize = 15.sp),
+                                maxLines = 1
+                            )
+                            CyberWindowGlyphs(
+                                accentColor = if (isGuestMode) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+                            )
+                        }
                         Text(
                             text = displayName,
                             style = MaterialTheme.typography.labelLarge,
@@ -470,77 +568,85 @@ private fun IbCoderSidebarContent(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        if (!user.email.isNullOrBlank()) {
-                            Text(
-                                text = user.email!!,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                        Text(
+                            text = if (isGuestMode) "GUEST // LOCAL STORAGE" else (user?.email ?: "Signed in"),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = JetBrainsMonoFamily,
+                            color = if (isGuestMode) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-                    IconButton(
-                        onClick = onSyncNow,
-                        enabled = syncStatus !is CloudVaultSyncStatus.Syncing,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .testTag("drawer_sync_now_button")
-                    ) {
-                        if (syncStatus is CloudVaultSyncStatus.Syncing) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(
-                                Icons.Rounded.Sync,
-                                contentDescription = "Sync account vault",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
+                    if (!isGuestMode) {
+                        IconButton(
+                            onClick = onSyncNow,
+                            enabled = syncStatus !is CloudVaultSyncStatus.Syncing,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .testTag("drawer_sync_now_button")
+                        ) {
+                            if (syncStatus is CloudVaultSyncStatus.Syncing) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(
+                                    Icons.Rounded.Sync,
+                                    contentDescription = "Sync account vault",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
 
-                // Cloud Vault Status Pill
-                val (statusIcon, statusText, statusColor) = when (syncStatus) {
-                    is CloudVaultSyncStatus.Synced -> Triple(
-                        Icons.Rounded.CloudDone,
-                        "Vault synced • ${syncStatus.syncedKeysCount} keys",
-                        MaterialTheme.colorScheme.primary
-                    )
-                    is CloudVaultSyncStatus.Syncing -> Triple(
-                        Icons.Rounded.Sync,
-                        syncStatus.detail,
-                        MaterialTheme.colorScheme.secondary
-                    )
-                    is CloudVaultSyncStatus.Error -> Triple(
-                        Icons.Rounded.CloudOff,
-                        syncStatus.message,
-                        MaterialTheme.colorScheme.error
-                    )
-                    CloudVaultSyncStatus.SignedOut -> Triple(
-                        Icons.Rounded.CloudOff,
-                        "Offline",
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = statusIcon,
-                        contentDescription = null,
-                        tint = statusColor,
-                        modifier = Modifier.size(14.dp)
-                    )
+                if (isGuestMode) {
                     Text(
-                        text = statusText,
+                        text = "Keys & repos stay on-device. Sign in anytime to sync across devices.",
                         style = MaterialTheme.typography.labelSmall,
-                        color = statusColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                } else {
+                    val (statusIcon, statusText, statusColor) = when (syncStatus) {
+                        is CloudVaultSyncStatus.Synced -> Triple(
+                            Icons.Rounded.CloudDone,
+                            "Vault synced • ${syncStatus.syncedKeysCount} keys",
+                            MaterialTheme.colorScheme.primary
+                        )
+                        is CloudVaultSyncStatus.Syncing -> Triple(
+                            Icons.Rounded.Sync,
+                            syncStatus.detail,
+                            MaterialTheme.colorScheme.secondary
+                        )
+                        is CloudVaultSyncStatus.Error -> Triple(
+                            Icons.Rounded.CloudOff,
+                            syncStatus.message,
+                            MaterialTheme.colorScheme.error
+                        )
+                        CloudVaultSyncStatus.SignedOut -> Triple(
+                            Icons.Rounded.CloudOff,
+                            "Offline",
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = statusIcon,
+                            contentDescription = null,
+                            tint = statusColor,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = statusColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
                 if (!activeProjectName.isNullOrBlank()) {
@@ -596,18 +702,39 @@ private fun IbCoderSidebarContent(
             color = MaterialTheme.colorScheme.outlineVariant
         )
 
+        if (isGuestMode) {
+            Button(
+                onClick = onSignInWithGoogle,
+                enabled = !isSigningIn,
+                shape = RoundedCornerShape(4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("drawer_google_signin_button")
+            ) {
+                Icon(Icons.Rounded.AccountCircle, contentDescription = null, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (isSigningIn) "Signing in..." else "Sign in with Google", fontWeight = FontWeight.Medium)
+            }
+            Spacer(Modifier.height(6.dp))
+        }
+
         OutlinedButton(
             onClick = onSignOut,
-            shape = RoundedCornerShape(8.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
+            shape = RoundedCornerShape(4.dp),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = if (isGuestMode) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error
+            ),
+            border = BorderStroke(
+                1.dp,
+                if (isGuestMode) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.error.copy(alpha = 0.45f)
+            ),
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("drawer_sign_out_button")
         ) {
             Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, modifier = Modifier.size(17.dp))
             Spacer(Modifier.width(8.dp))
-            Text("Sign Out", fontWeight = FontWeight.Medium)
+            Text(if (isGuestMode) "Exit Guest Mode" else "Sign Out", fontWeight = FontWeight.Medium)
         }
     }
 }
@@ -616,8 +743,9 @@ private fun IbCoderSidebarContent(
 private fun SidebarSectionHeader(title: String) {
     Text(
         text = title,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontFamily = SilkscreenFamily,
+        fontSize = 10.sp,
+        color = MaterialTheme.colorScheme.primary,
         letterSpacing = 1.sp,
         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
     )
@@ -650,7 +778,7 @@ private fun SidebarDrawerItem(
             {
                 Surface(
                     color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = RoundedCornerShape(6.dp)
+                    shape = RoundedCornerShape(3.dp)
                 ) {
                     Text(
                         text = badgeText,
@@ -662,9 +790,9 @@ private fun SidebarDrawerItem(
                 }
             }
         },
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(4.dp),
         colors = NavigationDrawerItemDefaults.colors(
-            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
             unselectedContainerColor = Color.Transparent,
             selectedIconColor = MaterialTheme.colorScheme.primary,
             selectedTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -680,6 +808,7 @@ private fun SidebarDrawerItem(
 private fun isRouteSelected(currentDestination: NavDestination?, route: Any): Boolean {
     return when (route) {
         WorkspaceRoute -> currentDestination?.hasRoute<WorkspaceRoute>() == true
+        TerminalRoute -> currentDestination?.hasRoute<TerminalRoute>() == true
         ProjectsRoute -> currentDestination?.hasRoute<ProjectsRoute>() == true
         ChatRoute -> currentDestination?.hasRoute<ChatRoute>() == true
         SessionsRoute -> currentDestination?.hasRoute<SessionsRoute>() == true

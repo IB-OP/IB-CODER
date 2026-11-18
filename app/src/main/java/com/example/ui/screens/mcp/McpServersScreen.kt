@@ -75,6 +75,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.model.McpTransport
+import com.example.ui.components.cyberScanlineGrid
 import com.example.ui.theme.JetBrainsMonoFamily
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,6 +139,11 @@ fun McpServersScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .cyberScanlineGrid(
+                    accentColor = MaterialTheme.colorScheme.secondary,
+                    scanlineAlpha = 0.025f,
+                    gridAlpha = 0.02f
+                )
                 .padding(innerPadding),
             contentAlignment = Alignment.TopCenter
         ) {
@@ -309,7 +315,7 @@ private fun McpServerCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("mcp_card_${cfg.id}"),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(4.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),

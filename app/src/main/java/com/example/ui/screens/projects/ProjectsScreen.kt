@@ -72,6 +72,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.model.WorkspaceProject
 import com.example.ui.components.CreateProjectDialog
+import com.example.ui.components.CyberWindowGlyphs
+import com.example.ui.components.cyberScanlineGrid
 import com.example.ui.screens.github.GitHubScreen
 import com.example.ui.screens.github.GitHubViewModel
 import com.example.ui.screens.sessions.SessionsScreen
@@ -79,6 +81,7 @@ import com.example.ui.screens.sessions.SessionsViewModel
 import com.example.ui.screens.workspace.WorkspaceViewModel
 import com.example.ui.theme.BrandWordmarkStyle
 import com.example.ui.theme.JetBrainsMonoFamily
+import com.example.ui.theme.SilkscreenFamily
 
 private enum class ProjectsHubTab(val label: String) {
     WORKSPACES("Workspaces"),
@@ -210,7 +213,12 @@ fun ProjectsScreen(
         Box(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .cyberScanlineGrid(
+                    accentColor = MaterialTheme.colorScheme.primary,
+                    scanlineAlpha = 0.025f,
+                    gridAlpha = 0.02f
+                ),
             contentAlignment = Alignment.TopCenter
         ) {
             when (selectedTab) {
@@ -296,7 +304,7 @@ fun ProjectsScreen(
                                             workspaceViewModel.selectProject(proj.id)
                                             onOpenCode()
                                         },
-                                        shape = RoundedCornerShape(6.dp),
+                                        shape = RoundedCornerShape(4.dp),
                                         colors = CardDefaults.cardColors(
                                             containerColor = if (isActive) {
                                                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
@@ -350,16 +358,24 @@ fun ProjectsScreen(
                                                     )
                                                 }
                                                 if (isActive) {
-                                                    Surface(
-                                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                                                        shape = RoundedCornerShape(4.dp)
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                                     ) {
-                                                        Text(
-                                                            text = "ACTIVE",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            color = MaterialTheme.colorScheme.primary,
-                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                        )
+                                                        CyberWindowGlyphs(accentColor = MaterialTheme.colorScheme.primary)
+                                                        Surface(
+                                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                                                            shape = RoundedCornerShape(3.dp),
+                                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
+                                                        ) {
+                                                            Text(
+                                                                text = "ACTIVE",
+                                                                fontFamily = SilkscreenFamily,
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = MaterialTheme.colorScheme.primary,
+                                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }

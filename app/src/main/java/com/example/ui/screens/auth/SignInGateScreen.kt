@@ -1,11 +1,8 @@
 package com.example.ui.screens.auth
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
-import android.util.Log
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,7 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -30,13 +26,13 @@ import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,24 +51,16 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.credentials.CredentialManager
-import androidx.credentials.CustomCredential
-import androidx.credentials.GetCredentialRequest
-import androidx.credentials.exceptions.GetCredentialCancellationException
-import androidx.credentials.exceptions.GetCredentialException
 import com.example.AppContainer
 import com.example.R
+import com.example.ui.components.CyberWindowPanel
+import com.example.ui.components.cyberScanlineGrid
 import com.example.ui.theme.BrandWordmarkStyle
-import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
-import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
-import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
+import com.example.ui.theme.JetBrainsMonoFamily
+import com.example.ui.theme.SilkscreenFamily
 import kotlinx.coroutines.launch
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
-}
 
 @Composable
 fun SignInGateScreen(
@@ -85,58 +73,29 @@ fun SignInGateScreen(
     var isBusy by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    suspend fun handleGoogleCredentialResult(credentialData: android.os.Bundle) {
-        try {
-            val googleCred = GoogleIdTokenCredential.createFrom(credentialData)
-            container.cloudAccountVaultRepository.signInWithGoogleIdToken(googleCred.idToken).fold(
-                onSuccess = {
-                    errorMessage = null
-                },
-                onFailure = { err ->
-                    errorMessage = err.message ?: "Firebase authentication failed."
-                }
-            )
-        } catch (e: GoogleIdTokenParsingException) {
-            Log.e("Auth", "Invalid Google ID token", e)
-            errorMessage = "Could not parse Google Sign-In response."
-        }
-    }
-
     fun launchInteractiveGoogleSignIn() {
-        val activity = context.findActivity()
-        if (activity == null) {
-            errorMessage = "Cannot start Google Sign-In without an active screen."
-            return
-        }
         scope.launch {
             isBusy = true
             errorMessage = null
-            try {
-                val clientId = context.getString(R.string.default_web_client_id)
-                val signInOption = GetSignInWithGoogleOption.Builder(clientId).build()
-                val request = GetCredentialRequest.Builder()
-                    .addCredentialOption(signInOption)
-                    .build()
-                val result = credentialManager.getCredential(activity, request)
-                val cred = result.credential
-                if (cred is CustomCredential &&
-                    cred.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
-                ) {
-                    handleGoogleCredentialResult(cred.data)
-                } else {
-                    errorMessage = "Unsupported credential type returned."
-                }
-            } catch (e: GetCredentialCancellationException) {
-                Log.w("Auth", "User cancelled Google Sign-In", e)
-            } catch (e: GetCredentialException) {
-                Log.e("Auth", "Credential Manager sign-in error", e)
-                errorMessage = e.message ?: "Google Sign-In failed. Ensure a Google account is signed in on this device."
-            } catch (e: Exception) {
-                Log.e("Auth", "Unexpected sign-in error", e)
-                errorMessage = e.message ?: "Sign-in failed."
-            } finally {
-                isBusy = false
+            when (
+                val outcome = performInteractiveGoogleSignIn(
+                    context = context,
+                    credentialManager = credentialManager,
+                    cloudAccountVaultRepository = container.cloudAccountVaultRepository
+                )
+            ) {
+                GoogleSignInOutcome.Success -> errorMessage = null
+                GoogleSignInOutcome.Cancelled -> Unit
+                is GoogleSignInOutcome.Error -> errorMessage = outcome.message
             }
+            isBusy = false
+        }
+    }
+
+    fun continueAsGuest() {
+        scope.launch {
+            errorMessage = null
+            container.settingsDataStore.setGuestMode(true)
         }
     }
 
@@ -147,6 +106,7 @@ fun SignInGateScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .cyberScanlineGrid(accentColor = MaterialTheme.colorScheme.primary)
                 .systemBarsPadding()
                 .imePadding()
                 .padding(20.dp),
@@ -158,12 +118,12 @@ fun SignInGateScreen(
                     .widthIn(max = 460.dp)
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
-                    modifier = Modifier.size(88.dp)
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
+                    modifier = Modifier.size(84.dp)
                 ) {
                     Image(
                         painter = painterResource(R.drawable.ib_coder_logo),
@@ -175,12 +135,20 @@ fun SignInGateScreen(
 
                 Text(
                     text = "IB CODER",
-                    style = BrandWordmarkStyle.copy(fontSize = MaterialTheme.typography.displaySmall.fontSize),
+                    style = BrandWordmarkStyle.copy(fontSize = 30.sp),
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Sign in to link your AI provider API keys, custom endpoints, GitHub tokens, and MCP servers across all your devices.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "AI WORKBENCH // CYBER-SHELL // CLOUD VAULT",
+                    fontFamily = SilkscreenFamily,
+                    fontSize = 10.sp,
+                    letterSpacing = 1.sp,
+                    color = MaterialTheme.colorScheme.secondary,
+                    textAlign = TextAlign.Center
+                )
+                Text(
+                    text = "Start immediately in Guest Mode (local encrypted storage) or sign in with Google to sync API keys, GitHub tokens, custom providers, and MCP servers across devices.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
@@ -188,48 +156,48 @@ fun SignInGateScreen(
                 errorMessage?.let { err ->
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(4.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = err,
                             style = MaterialTheme.typography.bodySmall,
+                            fontFamily = JetBrainsMonoFamily,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                             modifier = Modifier.padding(12.dp)
                         )
                     }
                 }
 
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                CyberWindowPanel(
+                    title = "ACCESS // AUTH_NODE",
+                    accentColor = MaterialTheme.colorScheme.primary,
+                    badgeText = "ZERO-TRUST",
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
-                        modifier = Modifier.padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(11.dp)
                     ) {
-                        Text(
-                            text = "Cross-Device Account Vault",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
                         VaultFeatureRow(
                             icon = Icons.Rounded.Key,
                             text = "Sync AI provider API keys & custom provider URLs"
                         )
                         VaultFeatureRow(
                             icon = Icons.Rounded.CloudSync,
-                            text = "Restore GitHub token, repo links & auto-sync preferences"
+                            text = "Restore GitHub token, repo links & CI auto-sync"
                         )
                         VaultFeatureRow(
                             icon = Icons.Rounded.Hub,
-                            text = "Keep MCP servers & session prompts linked to your account"
+                            text = "Keep MCP servers & session prompts across devices"
                         )
                         VaultFeatureRow(
                             icon = Icons.Rounded.Security,
-                            text = "Zero-trust user-isolated storage scoped to your account"
+                            text = "Or use Guest Mode completely offline with Keystore vault"
                         )
 
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -237,10 +205,10 @@ fun SignInGateScreen(
                         Button(
                             onClick = { launchInteractiveGoogleSignIn() },
                             enabled = !isBusy,
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(4.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 50.dp)
+                                .heightIn(min = 48.dp)
                                 .testTag("gate_google_signin_button")
                         ) {
                             if (isBusy) {
@@ -264,6 +232,31 @@ fun SignInGateScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
+                        }
+
+                        OutlinedButton(
+                            onClick = { continueAsGuest() },
+                            enabled = !isBusy,
+                            shape = RoundedCornerShape(4.dp),
+                            border = BorderStroke(1.25.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .testTag("gate_guest_mode_button")
+                        ) {
+                            Icon(
+                                Icons.Rounded.Terminal,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = "Continue as Guest (No Sign-In Needed)",
+                                color = MaterialTheme.colorScheme.tertiary,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
                     }
                 }

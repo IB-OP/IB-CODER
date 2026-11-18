@@ -88,7 +88,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.model.ProviderApiDiscoveryResult
 import com.example.domain.model.ProviderCategory
 import com.example.domain.model.ToolSupportStatus
+import com.example.ui.components.cyberScanlineGrid
 import com.example.ui.theme.JetBrainsMonoFamily
+import com.example.ui.theme.SilkscreenFamily
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -156,6 +158,11 @@ fun ProvidersScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .cyberScanlineGrid(
+                    accentColor = MaterialTheme.colorScheme.secondary,
+                    scanlineAlpha = 0.025f,
+                    gridAlpha = 0.02f
+                )
                 .padding(innerPadding),
             contentAlignment = Alignment.TopCenter
         ) {
@@ -234,8 +241,8 @@ fun ProvidersScreen(
                             colors = CardDefaults.cardColors(
                                 containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
                             ),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
-                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)),
+                            shape = RoundedCornerShape(4.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("providers_add_custom_banner")
@@ -360,7 +367,7 @@ private fun ProviderCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("provider_card_${card.metadata.id}"),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(4.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),
@@ -823,9 +830,10 @@ private fun CategoryBadge(category: ProviderCategory) {
             MaterialTheme.colorScheme.onSurface
         )
     }
-    Surface(color = container, shape = RoundedCornerShape(6.dp)) {
+    Surface(color = container, shape = RoundedCornerShape(3.dp)) {
         Text(
             text = label,
+            fontFamily = SilkscreenFamily,
             style = MaterialTheme.typography.labelSmall,
             color = content,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)

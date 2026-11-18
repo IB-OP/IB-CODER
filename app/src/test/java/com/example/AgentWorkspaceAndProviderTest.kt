@@ -12,6 +12,7 @@ import com.example.data.network.McpClient
 import com.example.data.network.ProviderRegistry
 import com.example.data.preferences.SettingsDataStore
 import com.example.data.security.KeystoreCryptoManager
+import com.example.data.terminal.TerminalExecutor
 import com.example.data.workspace.SafDocumentStorage
 import com.example.data.workspace.WorkspaceManager
 import com.example.domain.model.CustomProviderDefinition
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
+import java.util.zip.GZIPOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import org.junit.After
@@ -635,5 +637,153 @@ class AgentWorkspaceAndProviderTest {
         assertEquals("", settings.getMcpAuthToken("mcp_synced_1"))
         assertTrue(settings.getCustomProviders().isEmpty())
         assertTrue(settings.getMcpServers().isEmpty())
+    }
+
+    @Test
+    fun `guest mode preference toggles cleanly without requiring sign in`() = runTest {
+        val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        val settings = SettingsDataStore(context, KeystoreCryptoManager(), json)
+
+        assertFalse(settings.guestModeFlow.first())
+        settings.setGuestMode(true)
+        assertTrue(settings.guestModeFlow.first())
+
+        settings.setGuestMode(false)
+        assertFalse(settings.guestModeFlow.first())
+    }
+
+    @Test
+    fun `terminal executor runs sh commands, blocks destructive rm, creates gradle wrapper, and installs npm tgz via run_terminal tool`() = runTest {
+        val project = workspaceManager.createProject("TermReactApp")
+        val json = Json { ignoreUnknownKeys = true; isLenient = true; encodeDefaults = true }
+
+        val tgzBytes = buildSingleFileTgz(
+            entryName = "package/package.json",
+            content = """{"name":"react","version":"19.0.0"}"""
+        )
+
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        val portHolder = intArrayOf(0)
+        server.createContext("/react") { exchange ->
+            val metadata = """
+                {
+                  "name": "react",
+                  "dist-tags": { "latest": "19.0.0" },
+                  "versions": {
+                    "19.0.0": {
+                      "dist": {
+                        "tarball": "http://127.0.0.1:${portHolder[0]}/tarballs/react-19.0.0.tgz"
+                      }
+                    }
+                  }
+                }
+            """.trimIndent().toByteArray(Charsets.UTF_8)
+            exchange.responseHeaders.add("Content-Type", "application/json")
+            exchange.sendResponseHeaders(200, metadata.size.toLong())
+            exchange.responseBody.use { it.write(metadata) }
+        }
+        server.createContext("/tarballs/react-19.0.0.tgz") { exchange ->
+            exchange.responseHeaders.add("Content-Type", "application/gzip")
+            exchange.sendResponseHeaders(200, tgzBytes.size.toLong())
+            exchange.responseBody.use { it.write(tgzBytes) }
+        }
+        server.start()
+        portHolder[0] = server.address.port
+
+        try {
+            val termExecutor = TerminalExecutor(
+                context = context,
+                workspaceManager = workspaceManager,
+                okHttpClient = OkHttpClient(),
+                json = json,
+                npmRegistryBaseUrl = "http://127.0.0.1:${portHolder[0]}",
+                gradleDistBaseUrl = "http://127.0.0.1:${portHolder[0]}/gradle"
+            )
+            val agentTools = AgentToolExecutor(
+                workspaceManager = workspaceManager,
+                json = json,
+                terminalExecutor = termExecutor
+            )
+
+            // 1. Safe shell execution via AI agent run_terminal tool
+            val shOutcome = agentTools.execute(
+                projectId = project.id,
+                toolCallId = "term1",
+                toolName = "run_terminal",
+                argumentsJson = """{"command":"echo CYBER_SHELL_OK && pwd"}""",
+                confirmDeletion = { false }
+            )
+            assertTrue("Expected run_terminal sh command to succeed: ${shOutcome.output}", shOutcome.success)
+            assertTrue(shOutcome.output.contains("CYBER_SHELL_OK"))
+
+            // 2. Destructive command guard
+            val blockedOutcome = agentTools.execute(
+                projectId = project.id,
+                toolCallId = "term2",
+                toolName = "run_terminal",
+                argumentsJson = """{"command":"rm -rf /"}""",
+                confirmDeletion = { false }
+            )
+            assertFalse(blockedOutcome.success)
+            assertTrue(blockedOutcome.output.contains("Blocked potentially destructive system command"))
+
+            // 3. Gradle wrapper generation in project workspace
+            val gradleWrapperRes = termExecutor.execute("gradle wrapper --gradle-version 8.13", project.id)
+            assertEquals(0, gradleWrapperRes.exitCode)
+            val gwProps = workspaceManager.readRawFile(project.id, "gradle/wrapper/gradle-wrapper.properties")
+            assertTrue(gwProps.contains("gradle-8.13-bin.zip"))
+
+            // 4. Real npm tarball extraction into node_modules/react
+            val npmRes = agentTools.execute(
+                projectId = project.id,
+                toolCallId = "term3",
+                toolName = "run_terminal",
+                argumentsJson = """{"command":"npm install react"}""",
+                confirmDeletion = { false }
+            )
+            assertTrue("Expected npm install react to succeed: ${npmRes.output}", npmRes.success)
+            val reactPkg = workspaceManager.readRawFile(project.id, "node_modules/react/package.json")
+            assertTrue(reactPkg.contains("19.0.0"))
+            val rootPkg = workspaceManager.readRawFile(project.id, "package.json")
+            assertTrue(rootPkg.contains("\"react\""))
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    private fun buildSingleFileTgz(entryName: String, content: String): ByteArray {
+        val data = content.toByteArray(Charsets.UTF_8)
+        val header = ByteArray(512)
+        val nameBytes = entryName.toByteArray(Charsets.UTF_8)
+        System.arraycopy(nameBytes, 0, header, 0, minOf(nameBytes.size, 100))
+
+        // mode 0644, uid 0, gid 0, size (octal 11 chars + null), mtime, typeflag '0'
+        System.arraycopy("0000644\u0000".toByteArray(Charsets.US_ASCII), 0, header, 100, 8)
+        System.arraycopy("0000000\u0000".toByteArray(Charsets.US_ASCII), 0, header, 108, 8)
+        System.arraycopy("0000000\u0000".toByteArray(Charsets.US_ASCII), 0, header, 116, 8)
+        val sizeStr = String.format("%011o\u0000", data.size)
+        System.arraycopy(sizeStr.toByteArray(Charsets.US_ASCII), 0, header, 124, 12)
+        System.arraycopy("00000000000\u0000".toByteArray(Charsets.US_ASCII), 0, header, 136, 12)
+        // checksum placeholder = 8 spaces
+        for (i in 148 until 156) header[i] = ' '.code.toByte()
+        header[156] = '0'.code.toByte()
+        System.arraycopy("ustar\u0000".toByteArray(Charsets.US_ASCII), 0, header, 257, 6)
+        System.arraycopy("00".toByteArray(Charsets.US_ASCII), 0, header, 263, 2)
+
+        var sum = 0
+        for (b in header) sum += (b.toInt() and 0xFF)
+        val cksum = String.format("%06o\u0000 ", sum)
+        System.arraycopy(cksum.toByteArray(Charsets.US_ASCII), 0, header, 148, 8)
+
+        val baos = ByteArrayOutputStream()
+        GZIPOutputStream(baos).use { gz ->
+            gz.write(header)
+            gz.write(data)
+            val rem = data.size % 512
+            if (rem != 0) gz.write(ByteArray(512 - rem))
+            // Two 512-byte EOF blocks
+            gz.write(ByteArray(1024))
+        }
+        return baos.toByteArray()
     }
 }

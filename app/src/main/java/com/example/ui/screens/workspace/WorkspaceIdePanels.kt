@@ -61,6 +61,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -105,7 +106,9 @@ import com.example.domain.model.FileNode
 import com.example.domain.model.GitHubSyncStatus
 import com.example.domain.model.SessionMode
 import com.example.domain.model.WorkspaceProject
+import com.example.ui.components.CyberWindowGlyphs
 import com.example.ui.components.SyntaxHighlighter
+import com.example.ui.components.cyberScanlineGrid
 import com.example.ui.screens.chat.ChatUiState
 import com.example.ui.theme.BrandWordmarkStyle
 import com.example.ui.theme.IdeCodeGold
@@ -114,6 +117,7 @@ import com.example.ui.theme.IdeFolderCyan
 import com.example.ui.theme.IdeHtmlCoral
 import com.example.ui.theme.IdeStyleBlue
 import com.example.ui.theme.JetBrainsMonoFamily
+import com.example.ui.theme.SilkscreenFamily
 
 internal enum class IdeSidebarSection(val label: String) {
     EXPLORER("FILES"),
@@ -337,6 +341,7 @@ internal fun WorkspaceQuickActionBar(
     hasOpenFile: Boolean,
     openFileName: String?,
     onToggleFiles: () -> Unit,
+    onOpenTerminal: () -> Unit = {},
     onNewFile: () -> Unit,
     onCommitGitHub: () -> Unit,
     onNewSession: () -> Unit,
@@ -358,7 +363,7 @@ internal fun WorkspaceQuickActionBar(
             ) {
                 FilledTonalButton(
                     onClick = onToggleFiles,
-                    shape = RoundedCornerShape(6.dp),
+                    shape = RoundedCornerShape(4.dp),
                     colors = if (filesOpen) {
                         ButtonDefaults.filledTonalButtonColors(
                             containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -385,10 +390,27 @@ internal fun WorkspaceQuickActionBar(
                     )
                 }
 
+                OutlinedButton(
+                    onClick = onOpenTerminal,
+                    shape = RoundedCornerShape(4.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.75f)),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.tertiary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .heightIn(min = 38.dp)
+                        .testTag("workspace_open_terminal_button")
+                ) {
+                    Icon(Icons.Rounded.Terminal, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(5.dp))
+                    Text("Terminal", style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                }
+
                 if (hasActiveProject) {
                     OutlinedButton(
                         onClick = onCommitGitHub,
-                        shape = RoundedCornerShape(6.dp),
+                        shape = RoundedCornerShape(4.dp),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                         modifier = Modifier
                             .heightIn(min = 38.dp)
@@ -401,7 +423,7 @@ internal fun WorkspaceQuickActionBar(
 
                     OutlinedButton(
                         onClick = onNewFile,
-                        shape = RoundedCornerShape(6.dp),
+                        shape = RoundedCornerShape(4.dp),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
                         modifier = Modifier
                             .heightIn(min = 38.dp)
@@ -415,6 +437,7 @@ internal fun WorkspaceQuickActionBar(
 
                 AssistChip(
                     onClick = onNewSession,
+                    shape = RoundedCornerShape(4.dp),
                     label = { Text("New Session", maxLines = 1) },
                     leadingIcon = {
                         Icon(Icons.Rounded.AddComment, contentDescription = null, modifier = Modifier.size(15.dp))
@@ -424,6 +447,7 @@ internal fun WorkspaceQuickActionBar(
 
                 AssistChip(
                     onClick = onOpenFullChat,
+                    shape = RoundedCornerShape(4.dp),
                     label = { Text("Full Chat", maxLines = 1) },
                     leadingIcon = {
                         Icon(Icons.Rounded.OpenInFull, contentDescription = null, modifier = Modifier.size(15.dp))
@@ -434,6 +458,7 @@ internal fun WorkspaceQuickActionBar(
                 if (hasOpenFile && !openFileName.isNullOrBlank()) {
                     AssistChip(
                         onClick = onCloseOpenFile,
+                        shape = RoundedCornerShape(4.dp),
                         label = { Text("Close $openFileName", maxLines = 1) },
                         leadingIcon = {
                             Icon(Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(15.dp))
@@ -1033,6 +1058,11 @@ internal fun WorkspaceFileViewerPane(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .cyberScanlineGrid(
+                    accentColor = MaterialTheme.colorScheme.secondary,
+                    scanlineAlpha = 0.025f,
+                    gridAlpha = 0.02f
+                )
                 .verticalScroll(rememberScrollState())
         ) {
             Text(
@@ -1045,7 +1075,7 @@ internal fun WorkspaceFileViewerPane(
                     .width(42.dp)
                     .padding(vertical = 10.dp, horizontal = 8.dp)
             )
-            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+            VerticalDivider(color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.35f))
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -1099,18 +1129,21 @@ internal fun IbAiWorkspaceConsole(
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = modifier.fillMaxWidth()
+        shape = RoundedCornerShape(4.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.55f)),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp, vertical = 4.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-            // Header ("IB_AI CONSOLE")
+            // Cyber Header ("IB_AI // WORKSPACE")
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(38.dp)
                     .background(MaterialTheme.colorScheme.surfaceContainer)
                     .clickable(enabled = !fullHeightMode, onClick = onToggleExpanded)
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -1122,14 +1155,15 @@ internal fun IbAiWorkspaceConsole(
                     Icon(
                         Icons.Rounded.SmartToy,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = MaterialTheme.colorScheme.tertiary,
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text = "IB_AI WORKSPACE",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontFamily = JetBrainsMonoFamily,
+                        text = "IB_AI // CONSOLE",
+                        fontFamily = SilkscreenFamily,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.tertiary,
                         maxLines = 1
                     )
                     val mode = chatState.currentSessionPrompt?.mode ?: chatState.currentSession?.mode
@@ -1140,6 +1174,7 @@ internal fun IbAiWorkspaceConsole(
                             null -> "Web Live"
                         },
                         style = MaterialTheme.typography.labelSmall,
+                        fontFamily = JetBrainsMonoFamily,
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1149,7 +1184,11 @@ internal fun IbAiWorkspaceConsole(
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    CyberWindowGlyphs(accentColor = MaterialTheme.colorScheme.tertiary)
                     IconButton(
                         onClick = onNewSessionClick,
                         modifier = Modifier.size(32.dp)
@@ -1225,12 +1264,22 @@ internal fun IbAiWorkspaceConsole(
                     Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.background)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+                        .cyberScanlineGrid(
+                            accentColor = MaterialTheme.colorScheme.tertiary,
+                            scanlineAlpha = 0.03f,
+                            gridAlpha = 0.02f
+                        )
                 } else {
                     Modifier
                         .fillMaxWidth()
                         .heightIn(min = 100.dp, max = 180.dp)
-                        .background(MaterialTheme.colorScheme.background)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+                        .cyberScanlineGrid(
+                            accentColor = MaterialTheme.colorScheme.tertiary,
+                            scanlineAlpha = 0.03f,
+                            gridAlpha = 0.02f
+                        )
                 }
 
                 Box(modifier = feedModifier) {
@@ -1244,9 +1293,9 @@ internal fun IbAiWorkspaceConsole(
                         ) {
                             Text(
                                 text = if (hasActiveProject) {
-                                    "[IB_AI]: Ready — build code, search the live internet, or tap Files above to inspect project files."
+                                    "[IB_AI]: Ready — build code, run terminal commands/installs, search live web, or tap Files above."
                                 } else {
-                                    "[IB_AI]: Ready — ask questions, search the live internet, or tap Files to open or create a project."
+                                    "[IB_AI]: Ready — ask questions, search the live web, run shell tools, or tap Files to open a project."
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontFamily = JetBrainsMonoFamily,
@@ -1259,17 +1308,19 @@ internal fun IbAiWorkspaceConsole(
                                         .horizontalScroll(rememberScrollState()),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    OutlinedButton(onClick = onPickFilesClick, shape = RoundedCornerShape(6.dp)) {
+                                    OutlinedButton(onClick = onPickFilesClick, shape = RoundedCornerShape(4.dp)) {
                                         Icon(Icons.Rounded.FolderCopy, contentDescription = null, modifier = Modifier.size(15.dp))
                                         Spacer(Modifier.width(6.dp))
                                         Text("Show Files")
                                     }
                                     AssistChip(
                                         onClick = { onPromptDraftChanged("Inspect the workspace and summarize the architecture") },
+                                        shape = RoundedCornerShape(4.dp),
                                         label = { Text("Inspect workspace") }
                                     )
                                     AssistChip(
                                         onClick = { onPromptDraftChanged("Search the web for the latest docs on ") },
+                                        shape = RoundedCornerShape(4.dp),
                                         label = { Text("Web search") }
                                     )
                                 }
@@ -1292,12 +1343,15 @@ internal fun IbAiWorkspaceConsole(
                                 }
                                 Surface(
                                     color = if (isUser) {
-                                        MaterialTheme.colorScheme.surfaceContainerLow
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
                                     } else {
-                                        MaterialTheme.colorScheme.surfaceContainerLowest
+                                        MaterialTheme.colorScheme.surfaceContainerLow
                                     },
-                                    shape = RoundedCornerShape(6.dp),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+                                    shape = RoundedCornerShape(4.dp),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        prefixColor.copy(alpha = if (isUser) 0.55f else 0.35f)
+                                    ),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Column(modifier = Modifier.padding(10.dp)) {

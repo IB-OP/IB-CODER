@@ -53,6 +53,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.model.GitHubRepositorySummary
 import com.example.domain.model.GitHubWorkflowJobLog
 import com.example.domain.model.GitHubWorkflowRunSummary
+import com.example.ui.components.cyberScanlineGrid
 import com.example.ui.theme.JetBrainsMonoFamily
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -101,6 +102,11 @@ fun GitHubScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .cyberScanlineGrid(
+                    accentColor = MaterialTheme.colorScheme.primary,
+                    scanlineAlpha = 0.025f,
+                    gridAlpha = 0.02f
+                )
                 .padding(innerPadding),
             contentAlignment = Alignment.TopCenter
         ) {

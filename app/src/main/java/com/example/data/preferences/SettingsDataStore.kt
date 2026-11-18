@@ -3,6 +3,7 @@ package com.example.data.preferences
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -67,6 +68,7 @@ class SettingsDataStore(
         val SESSION_PROMPT_CONFIGS = stringPreferencesKey("session_prompt_configs_json")
         val GITHUB_TOKEN_SECRET = stringPreferencesKey("github_pat")
         val LOCAL_PASSCODE_HASH = stringPreferencesKey("local_passcode_hash")
+        val GUEST_MODE = booleanPreferencesKey("guest_mode_enabled")
     }
 
     private val _mutations = MutableSharedFlow<CloudVaultMutation>(extraBufferCapacity = 64)
@@ -234,6 +236,16 @@ class SettingsDataStore(
     val appAccountSessionFlow: Flow<AppAccountSession> = context.settingsStore.data.map { prefs ->
         val raw = prefs[Keys.APP_ACCOUNT_SESSION] ?: return@map AppAccountSession()
         runCatching { json.decodeFromString<AppAccountSession>(raw) }.getOrDefault(AppAccountSession())
+    }
+
+    val guestModeFlow: Flow<Boolean> = context.settingsStore.data.map { prefs ->
+        prefs[Keys.GUEST_MODE] ?: false
+    }
+
+    suspend fun setGuestMode(enabled: Boolean) {
+        context.settingsStore.edit { prefs ->
+            prefs[Keys.GUEST_MODE] = enabled
+        }
     }
 
     val githubProjectConfigsFlow: Flow<Map<String, GitHubProjectConfig>> =

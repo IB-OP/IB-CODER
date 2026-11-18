@@ -99,6 +99,7 @@ class CloudAccountVaultRepository(
             val result = firebaseAuth.signInWithCredential(credential).await()
             val user = result.user ?: return Result.failure(IllegalStateException("Google sign-in returned no user."))
             _authState.value = user
+            settingsDataStore.setGuestMode(false)
             updateLocalSessionFromFirebaseUser(user)
             Result.success(user)
         } catch (e: CancellationException) {
@@ -164,6 +165,7 @@ class CloudAccountVaultRepository(
             }
             auth?.signOut()
             _authState.value = null
+            settingsDataStore.setGuestMode(false)
             if (clearLocalVaultSecrets) {
                 settingsDataStore.clearAccountVaultSecretsForSignOut()
             } else {

@@ -50,6 +50,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.domain.model.FileNode
 import com.example.ui.components.CreateNewSessionDialog
 import com.example.ui.components.CreateProjectDialog
+import com.example.ui.components.cyberScanlineGrid
 import com.example.ui.screens.chat.ChatViewModel
 import com.example.ui.screens.chat.ProviderOptionUi
 import com.example.ui.theme.JetBrainsMonoFamily
@@ -60,6 +61,7 @@ fun WorkspaceScreen(
     viewModel: WorkspaceViewModel,
     chatViewModel: ChatViewModel,
     onAskAgent: () -> Unit,
+    onOpenTerminal: () -> Unit = {},
     onOpenProviders: () -> Unit = {},
     onOpenMcpServers: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
@@ -111,6 +113,11 @@ fun WorkspaceScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .cyberScanlineGrid(
+                accentColor = MaterialTheme.colorScheme.primary,
+                scanlineAlpha = 0.025f,
+                gridAlpha = 0.02f
+            )
             .navigationBarsPadding()
             .imePadding()
     ) {
@@ -135,6 +142,7 @@ fun WorkspaceScreen(
             hasOpenFile = state.selectedFilePath != null,
             openFileName = state.selectedFilePath?.substringAfterLast('/'),
             onToggleFiles = { filesPanelVisible = !filesPanelVisible },
+            onOpenTerminal = onOpenTerminal,
             onNewFile = { showNewFileDialog = true },
             onCommitGitHub = {
                 viewModel.resetGitHubDialogFeedback()

@@ -14,6 +14,7 @@ import com.example.data.preferences.SettingsDataStore
 import com.example.data.remote.CloudAccountVaultRepository
 import com.example.data.repository.ChatRepository
 import com.example.data.security.KeystoreCryptoManager
+import com.example.data.terminal.TerminalExecutor
 import com.example.data.workspace.WorkspaceManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -98,10 +99,18 @@ class AppContainer(context: Context) {
         json = json
     )
 
+    val terminalExecutor = TerminalExecutor(
+        context = appContext,
+        workspaceManager = workspaceManager,
+        okHttpClient = okHttpClient,
+        json = json
+    )
+
     val toolExecutor = AgentToolExecutor(
         workspaceManager = workspaceManager,
         json = json,
-        internetToolClient = internetToolClient
+        internetToolClient = internetToolClient,
+        terminalExecutor = terminalExecutor
     )
 
     val chatRepository = ChatRepository(

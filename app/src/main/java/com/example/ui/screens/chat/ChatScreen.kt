@@ -103,9 +103,12 @@ import com.example.domain.model.ToolSupportStatus
 import com.example.domain.prompt.SystemPromptPresets
 import com.example.ui.components.CreateNewSessionDialog
 import com.example.ui.components.CreateProjectDialog
+import com.example.ui.components.CyberWindowGlyphs
 import com.example.ui.components.MarkdownMessageContent
+import com.example.ui.components.cyberScanlineGrid
 import com.example.ui.theme.BrandWordmarkStyle
 import com.example.ui.theme.JetBrainsMonoFamily
+import com.example.ui.theme.SilkscreenFamily
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -220,6 +223,11 @@ fun ChatScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .cyberScanlineGrid(
+                    accentColor = MaterialTheme.colorScheme.primary,
+                    scanlineAlpha = 0.03f,
+                    gridAlpha = 0.02f
+                )
                 .padding(innerPadding)
                 .imePadding(),
             contentAlignment = Alignment.TopCenter
@@ -835,8 +843,8 @@ private fun EmptyChatState(
         verticalArrangement = Arrangement.Center
     ) {
         Surface(
-            shape = RoundedCornerShape(8.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+            shape = RoundedCornerShape(4.dp),
+            border = BorderStroke(1.25.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)),
             modifier = Modifier.size(76.dp)
         ) {
             Image(
@@ -847,10 +855,16 @@ private fun EmptyChatState(
             )
         }
         Spacer(Modifier.height(14.dp))
-        Text(
-            text = "IB CODER",
-            style = MaterialTheme.typography.displaySmall
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "IB CODER",
+                style = MaterialTheme.typography.displaySmall
+            )
+            CyberWindowGlyphs(accentColor = MaterialTheme.colorScheme.primary)
+        }
         Spacer(Modifier.height(4.dp))
         Text(
             text = when (sessionMode) {
@@ -925,20 +939,20 @@ private fun EmptyChatState(
 @Composable
 private fun ChatMessageBubble(message: ChatMessageUi) {
     val isUser = message.role == ChatRole.USER
+    val accent = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
     val containerColor = if (isUser) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
     } else {
         MaterialTheme.colorScheme.surfaceContainerLow
     }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(6.dp),
+        shape = RoundedCornerShape(4.dp),
         colors = CardDefaults.cardColors(containerColor = containerColor),
         border = BorderStroke(
             1.dp,
-            if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.65f)
-            else MaterialTheme.colorScheme.outlineVariant
+            accent.copy(alpha = if (isUser) 0.7f else 0.45f)
         )
     ) {
         Column(
@@ -954,9 +968,9 @@ private fun ChatMessageBubble(message: ChatMessageUi) {
             ) {
                 Text(
                     text = if (isUser) "[USER]" else "[IB_AI] • ${message.modelId ?: "AI"}",
+                    fontFamily = SilkscreenFamily,
                     style = MaterialTheme.typography.labelLarge,
-                    fontFamily = JetBrainsMonoFamily,
-                    color = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
+                    color = accent
                 )
                 if (message.isStreaming) {
                     Row(
@@ -1084,8 +1098,8 @@ private fun InlineToolCallCard(toolCall: ToolCallRecord) {
     Surface(
         onClick = { expanded = !expanded },
         color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = RoundedCornerShape(4.dp),
+        border = BorderStroke(1.dp, tint.copy(alpha = 0.5f)),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(10.dp)) {

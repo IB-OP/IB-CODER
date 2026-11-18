@@ -283,7 +283,7 @@ class CodingAgentOrchestrator(
     }
 
     companion object {
-        private val MUTATING_TOOLS = setOf("write_file", "edit_file", "create_folder", "delete_file")
+        private val MUTATING_TOOLS = setOf("write_file", "edit_file", "create_folder", "delete_file", "run_terminal")
     }
 
     private suspend fun buildWorkspaceSummary(

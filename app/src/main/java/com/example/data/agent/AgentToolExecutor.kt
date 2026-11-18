@@ -1,6 +1,7 @@
 package com.example.data.agent
 
 import com.example.data.network.InternetToolClient
+import com.example.data.terminal.TerminalExecutor
 import com.example.data.workspace.WorkspaceManager
 import com.example.domain.model.PendingDeletionConfirmation
 import com.example.domain.model.ToolDefinition
@@ -26,7 +27,8 @@ data class ToolExecutionOutcome(
 class AgentToolExecutor(
     private val workspaceManager: WorkspaceManager,
     private val json: Json,
-    private val internetToolClient: InternetToolClient = InternetToolClient(OkHttpClient(), json)
+    private val internetToolClient: InternetToolClient = InternetToolClient(OkHttpClient(), json),
+    private val terminalExecutor: TerminalExecutor? = null
 ) {
     val toolDefinitions: List<ToolDefinition> = listOf(
         ToolDefinition(
@@ -213,6 +215,24 @@ class AgentToolExecutor(
                 }
                 put("required", buildJsonArray { add(JsonPrimitive("query")) })
             }
+        ),
+        ToolDefinition(
+            name = "run_terminal",
+            description = "Run a shell command in the built-in IB CODER terminal (/system/bin/sh in the active workspace) or install packages & toolchains (e.g. 'npm install react react-dom', 'npx create-vite', 'pip install <pkg>', 'ibpkg install gradle', 'gradle wrapper', 'ibpkg list').",
+            parametersSchema = buildJsonObject {
+                put("type", "object")
+                putJsonObject("properties") {
+                    putJsonObject("command") {
+                        put("type", "string")
+                        put("description", "Shell command or ibpkg/npm/pip/gradle command to execute.")
+                    }
+                    putJsonObject("timeout_seconds") {
+                        put("type", "integer")
+                        put("description", "Optional timeout in seconds (5-300, default 90).")
+                    }
+                }
+                put("required", buildJsonArray { add(JsonPrimitive("command")) })
+            }
         )
     )
 
@@ -266,6 +286,23 @@ class AgentToolExecutor(
                 return res.fold(
                     onSuccess = { ToolExecutionOutcome(true, it) },
                     onFailure = { ToolExecutionOutcome(false, it.message ?: "fetch_url failed.") }
+                )
+            }
+
+            "run_terminal" -> {
+                val executor = terminalExecutor
+                    ?: return ToolExecutionOutcome(false, "Terminal executor is not initialized in this environment.")
+                val command = args["command"]?.jsonPrimitive?.content
+                    ?: return ToolExecutionOutcome(false, "Missing required parameter: command")
+                val timeout = args["timeout_seconds"]?.jsonPrimitive?.intOrNull ?: 90
+                val res = executor.execute(command = command, projectId = projectId, timeoutSeconds = timeout)
+                val formatted = buildString {
+                    appendLine("exit_code=${res.exitCode}")
+                    if (res.output.isNotBlank()) append(res.output)
+                }.trim()
+                return ToolExecutionOutcome(
+                    success = res.exitCode == 0,
+                    output = formatted
                 )
             }
         }

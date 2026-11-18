@@ -16,6 +16,8 @@ import com.example.domain.model.AppSettings
 import com.example.domain.model.ProviderConfig
 import com.example.domain.model.ProviderMetadata
 import com.example.domain.model.ThemeMode
+import com.example.ui.screens.auth.GoogleSignInOutcome
+import com.example.ui.screens.auth.performInteractiveGoogleSignIn
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +27,8 @@ import kotlinx.coroutines.launch
 data class SettingsUiState(
     val settings: AppSettings = AppSettings(),
     val accountSession: AppAccountSession = AppAccountSession(),
+    val isGuestMode: Boolean = false,
+    val isSigningIn: Boolean = false,
     val cloudSyncStatus: CloudVaultSyncStatus = CloudVaultSyncStatus.SignedOut,
     val providers: List<ProviderMetadata> = emptyList(),
     val providerConfigs: Map<String, ProviderConfig> = emptyMap(),
@@ -48,6 +52,7 @@ class SettingsViewModel(
     private val gitHubTokenState = MutableStateFlow("")
     private val gitHubStatusState = MutableStateFlow<String?>(null)
     private val gitHubVerifyingState = MutableStateFlow(false)
+    private val isSigningInState = MutableStateFlow(false)
 
     private val _uiState = MutableStateFlow(
         SettingsUiState(providers = providerRegistry.allAdapters().map { it.metadata })
@@ -89,16 +94,20 @@ class SettingsViewModel(
 
             val accountFlow = combine(
                 settingsDataStore.appAccountSessionFlow,
-                cloudAccountVaultRepository.syncStatus
-            ) { session, syncStatus ->
-                session to syncStatus
+                settingsDataStore.guestModeFlow,
+                cloudAccountVaultRepository.syncStatus,
+                isSigningInState
+            ) { session, guestMode, syncStatus, signingIn ->
+                AccountBundle(session, guestMode, syncStatus, signingIn)
             }
 
             combine(baseFlow, gitHubFlow, accountFlow, providerRegistry.customAdaptersFlow) { b, gh, acct, _ ->
                 SettingsUiState(
                     settings = b.settings,
-                    accountSession = acct.first,
-                    cloudSyncStatus = acct.second,
+                    accountSession = acct.session,
+                    isGuestMode = acct.guestMode,
+                    isSigningIn = acct.signingIn,
+                    cloudSyncStatus = acct.syncStatus,
                     providers = providerRegistry.allAdapters().map { it.metadata },
                     providerConfigs = b.configs,
                     mcpEnabledCount = b.mcpEnabledCount,
@@ -112,6 +121,35 @@ class SettingsViewModel(
             }.collect { state ->
                 _uiState.value = state
             }
+        }
+    }
+
+    fun signInWithGoogleFromGuest(context: Context) {
+        viewModelScope.launch {
+            isSigningInState.value = true
+            val cm = CredentialManager.create(context)
+            when (
+                val res = performInteractiveGoogleSignIn(
+                    context = context,
+                    credentialManager = cm,
+                    cloudAccountVaultRepository = cloudAccountVaultRepository
+                )
+            ) {
+                GoogleSignInOutcome.Success -> {
+                    savedBanner.value = "Signed in with Google. Cloud Vault sync started."
+                }
+                GoogleSignInOutcome.Cancelled -> Unit
+                is GoogleSignInOutcome.Error -> {
+                    savedBanner.value = res.message
+                }
+            }
+            isSigningInState.value = false
+        }
+    }
+
+    fun exitGuestMode() {
+        viewModelScope.launch {
+            settingsDataStore.setGuestMode(false)
         }
     }
 
@@ -207,6 +245,13 @@ class SettingsViewModel(
         val owner: String,
         val status: String?,
         val verifying: Boolean
+    )
+
+    private data class AccountBundle(
+        val session: AppAccountSession,
+        val guestMode: Boolean,
+        val syncStatus: CloudVaultSyncStatus,
+        val signingIn: Boolean
     )
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
