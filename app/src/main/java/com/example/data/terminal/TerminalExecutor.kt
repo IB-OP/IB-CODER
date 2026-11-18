@@ -1,6 +1,7 @@
 package com.example.data.terminal
 
 import android.content.Context
+import com.example.data.device.DeviceController
 import com.example.data.workspace.WorkspaceManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -74,7 +75,8 @@ class TerminalExecutor(
     private val json: Json,
     private val npmRegistryBaseUrl: String = "https://registry.npmjs.org",
     private val pypiBaseUrl: String = "https://pypi.org",
-    private val gradleDistBaseUrl: String = "https://services.gradle.org/distributions"
+    private val gradleDistBaseUrl: String = "https://services.gradle.org/distributions",
+    private val deviceController: DeviceController? = null
 ) {
     private val appContext = context.applicationContext
     private val toolchainsRoot: File = File(appContext.filesDir, "toolchains").apply { mkdirs() }
@@ -219,10 +221,65 @@ class TerminalExecutor(
                 handleGradleInvocation(tokens.drop(1), projectId, timeoutSeconds)
             }
 
+            (head == "su" || head == "shizuku" || head == "device") && deviceController != null -> {
+                handlePrivilegedTerminalCommand(head, raw, tokens, timeoutSeconds)
+            }
+
             else -> {
                 runSystemShell(raw, projectId, timeoutSeconds)
             }
         }
+    }
+
+    private suspend fun handlePrivilegedTerminalCommand(
+        head: String,
+        raw: String,
+        tokens: List<String>,
+        timeoutSeconds: Int
+    ): TerminalCommandResult {
+        val controller = deviceController
+            ?: return TerminalCommandResult(1, "DeviceController is not available.")
+
+        if (head == "device" && (tokens.size == 1 || tokens.getOrNull(1) == "status")) {
+            val status = controller.refreshStatus()
+            val summary = buildString {
+                appendLine("Privilege Status: ${status.statusSummary}")
+                appendLine("Active Backend: ${status.activeBackend.displayName}")
+                appendLine("Root (su): ${if (status.rootAvailable) "AVAILABLE (${status.rootBinaryPath ?: "su"})" else "not detected"}")
+                appendLine("Shizuku: ${status.shizukuBinderState.label} (installed=${status.shizukuInstalled}, running=${status.shizukuRunning}, perm=${status.shizukuPermissionGranted})")
+            }.trimEnd()
+            summary.lines().forEach { appendLine(it, TerminalLineKind.SYSTEM) }
+            return TerminalCommandResult(0, summary)
+        }
+
+        val innerCmd = when (head) {
+            "su" -> raw.removePrefix("su").trim().let { afterSu ->
+                when {
+                    afterSu.startsWith("-c ") -> afterSu.removePrefix("-c").trim()
+                    afterSu.isBlank() -> "id"
+                    else -> afterSu
+                }
+            }
+            "shizuku" -> raw.removePrefix("shizuku").trim().ifBlank { "id" }
+            else -> raw.removePrefix("device").trim().ifBlank { "id" }
+        }
+
+        val probe = controller.refreshStatus()
+        if (!probe.isReady) {
+            val err = "Privilege backend unavailable (${probe.statusSummary}). Open Phone Control from the sidebar to verify Root or authorize Shizuku."
+            appendLine(err, TerminalLineKind.STDERR)
+            return TerminalCommandResult(1, err)
+        }
+
+        appendLine("[${probe.activeBackend.name}] $innerCmd", TerminalLineKind.SYSTEM)
+        val res = controller.runShell(innerCmd, timeoutSeconds)
+        if (res.output.isNotBlank()) {
+            val kind = if (res.exitCode == 0) TerminalLineKind.STDOUT else TerminalLineKind.STDERR
+            res.output.lines().forEach { appendLine(it, kind) }
+        } else {
+            appendLine("(exit code ${res.exitCode})", TerminalLineKind.SYSTEM)
+        }
+        return TerminalCommandResult(res.exitCode, res.output.ifBlank { "(exit code ${res.exitCode})" })
     }
 
     private suspend fun handleCd(targetArg: String, projectId: String?): TerminalCommandResult {
@@ -1121,6 +1178,7 @@ class TerminalExecutor(
         • ibpkg install gradle    Download Gradle toolchain cache + write gradlew & gradle-wrapper.properties
         • gradle wrapper          Configure Gradle wrapper for the active workspace
         • ibpkg list              Show installed toolchains, node_modules, and Python packages
+        • su / shizuku <cmd>      Run privileged Android commands when Root or Shizuku is active ('device status')
         • cd <dir> | clear        Change workspace subdirectory or clear terminal buffer
         • Any Linux shell cmd     Runs in /system/bin/sh inside the active workspace (ls, cat, grep, uname, etc.)
     """.trimIndent()

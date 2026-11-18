@@ -28,3 +28,6 @@ data object McpServersRoute
 
 @Serializable
 data object GitHubRoute
+
+@Serializable
+data object DeviceControlRoute

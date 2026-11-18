@@ -17,6 +17,7 @@ import com.example.domain.model.GitHubProjectConfig
 import com.example.domain.model.GitHubRepositorySummary
 import com.example.domain.model.GitHubSyncStatus
 import com.example.domain.model.PendingDeletionConfirmation
+import com.example.domain.model.PendingDeviceActionConfirmation
 import com.example.domain.model.ProviderConfig
 import com.example.domain.model.ProviderMetadata
 import com.example.domain.model.SessionMode
@@ -66,6 +67,7 @@ data class ChatUiState(
     val activeSyncStatus: GitHubSyncStatus = GitHubSyncStatus.Idle,
     val pendingWorkflowAlert: WorkflowFailureAlert? = null,
     val pendingDeletion: PendingDeletionConfirmation? = null,
+    val pendingDeviceAction: PendingDeviceActionConfirmation? = null,
     val errorBanner: String? = null
 )
 
@@ -86,6 +88,7 @@ class ChatViewModel(
     private val selectedProviderOverride = MutableStateFlow<String?>(null)
     private val selectedModelOverride = MutableStateFlow<String?>(null)
     private val pendingDeletion = MutableStateFlow<PendingDeletionConfirmation?>(null)
+    private val pendingDeviceAction = MutableStateFlow<PendingDeviceActionConfirmation?>(null)
     private val pendingWorkflowAlert = MutableStateFlow<WorkflowFailureAlert?>(null)
     private val availableGitHubRepos = MutableStateFlow<List<GitHubRepositorySummary>>(emptyList())
     private val isLoadingGitHubRepos = MutableStateFlow(false)
@@ -93,6 +96,7 @@ class ChatViewModel(
 
     private var activeGenerationJob: Job? = null
     private var deletionDeferred: CompletableDeferred<Boolean>? = null
+    private var deviceActionDeferred: CompletableDeferred<Boolean>? = null
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
@@ -132,18 +136,20 @@ class ChatViewModel(
                     configs = configs
                 )
             }
+            val confirmationFlow = combine(pendingDeletion, pendingDeviceAction) { del, dev -> del to dev }
             val overrideBundleFlow = combine(
                 selectedProviderOverride,
                 selectedModelOverride,
-                pendingDeletion,
+                confirmationFlow,
                 errorBanner,
                 settingsDataStore.mcpServersFlow
-            ) { provOverride, modelOverride, deletion, err, mcpServers ->
+            ) { provOverride, modelOverride, confPair, err, mcpServers ->
                 val enabledMcp = mcpServers.filter { it.enabled }
                 OverrideBundle(
                     providerId = provOverride,
                     modelId = modelOverride,
-                    deletion = deletion,
+                    deletion = confPair.first,
+                    deviceAction = confPair.second,
                     error = err,
                     mcpServerCount = enabledMcp.size,
                     mcpToolCount = enabledMcp.sumOf { it.discoveredTools.size }
@@ -232,6 +238,7 @@ class ChatViewModel(
                     activeSyncStatus = activeSync,
                     pendingWorkflowAlert = ghBundle.alert,
                     pendingDeletion = oBundle.deletion,
+                    pendingDeviceAction = oBundle.deviceAction,
                     errorBanner = oBundle.error
                 )
             }.collect { state ->
@@ -482,6 +489,17 @@ class ChatViewModel(
                             pendingDeletion.value = null
                             deletionDeferred = null
                         }
+                    },
+                    confirmDeviceAction = { request ->
+                        val deferred = CompletableDeferred<Boolean>()
+                        deviceActionDeferred = deferred
+                        pendingDeviceAction.value = request
+                        try {
+                            deferred.await()
+                        } finally {
+                            pendingDeviceAction.value = null
+                            deviceActionDeferred = null
+                        }
                     }
                 )
             } catch (_: CancellationException) {
@@ -497,7 +515,9 @@ class ChatViewModel(
 
     fun stopGeneration() {
         deletionDeferred?.complete(false)
+        deviceActionDeferred?.complete(false)
         pendingDeletion.value = null
+        pendingDeviceAction.value = null
         activeGenerationJob?.cancel()
         activeGenerationJob = null
         isGenerating.value = false
@@ -507,6 +527,11 @@ class ChatViewModel(
     fun resolveDeletionConfirmation(approved: Boolean) {
         deletionDeferred?.complete(approved)
         pendingDeletion.value = null
+    }
+
+    fun resolveDeviceActionConfirmation(approved: Boolean) {
+        deviceActionDeferred?.complete(approved)
+        pendingDeviceAction.value = null
     }
 
     fun dismissError() {
@@ -532,6 +557,7 @@ class ChatViewModel(
         val providerId: String?,
         val modelId: String?,
         val deletion: PendingDeletionConfirmation?,
+        val deviceAction: PendingDeviceActionConfirmation?,
         val error: String?,
         val mcpServerCount: Int,
         val mcpToolCount: Int

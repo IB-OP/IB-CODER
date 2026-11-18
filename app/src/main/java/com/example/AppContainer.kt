@@ -3,6 +3,9 @@ package com.example
 import android.content.Context
 import com.example.data.agent.AgentToolExecutor
 import com.example.data.agent.CodingAgentOrchestrator
+import com.example.data.device.AndroidPrivilegeShellExecutor
+import com.example.data.device.DeviceController
+import com.example.data.device.PrivilegeShellExecutor
 import com.example.data.local.db.AppDatabase
 import com.example.data.network.GitHubPushClient
 import com.example.data.network.GitHubSyncManager
@@ -99,18 +102,28 @@ class AppContainer(context: Context) {
         json = json
     )
 
+    val privilegeShellExecutor: PrivilegeShellExecutor = AndroidPrivilegeShellExecutor(appContext)
+
+    val deviceController = DeviceController(
+        context = appContext,
+        privilegeExecutor = privilegeShellExecutor,
+        settingsDataStore = settingsDataStore
+    )
+
     val terminalExecutor = TerminalExecutor(
         context = appContext,
         workspaceManager = workspaceManager,
         okHttpClient = okHttpClient,
-        json = json
+        json = json,
+        deviceController = deviceController
     )
 
     val toolExecutor = AgentToolExecutor(
         workspaceManager = workspaceManager,
         json = json,
         internetToolClient = internetToolClient,
-        terminalExecutor = terminalExecutor
+        terminalExecutor = terminalExecutor,
+        deviceController = deviceController
     )
 
     val chatRepository = ChatRepository(
@@ -125,7 +138,8 @@ class AppContainer(context: Context) {
         toolExecutor = toolExecutor,
         workspaceManager = workspaceManager,
         mcpManager = mcpManager,
-        gitHubSyncManager = gitHubSyncManager
+        gitHubSyncManager = gitHubSyncManager,
+        deviceController = deviceController
     )
 
     init {

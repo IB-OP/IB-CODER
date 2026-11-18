@@ -1,5 +1,6 @@
 package com.example.data.agent
 
+import com.example.data.device.DeviceController
 import com.example.data.network.GitHubSyncManager
 import com.example.data.network.McpManager
 import com.example.data.network.ProviderRegistry
@@ -11,6 +12,7 @@ import com.example.domain.model.ChatMessageDto
 import com.example.domain.model.ChatMessageUi
 import com.example.domain.model.ChatRole
 import com.example.domain.model.PendingDeletionConfirmation
+import com.example.domain.model.PendingDeviceActionConfirmation
 import com.example.domain.model.SessionMode
 import com.example.domain.model.StreamEvent
 import com.example.domain.model.ToolCallDto
@@ -28,7 +30,8 @@ class CodingAgentOrchestrator(
     private val toolExecutor: AgentToolExecutor,
     private val workspaceManager: WorkspaceManager,
     private val mcpManager: McpManager,
-    private val gitHubSyncManager: GitHubSyncManager
+    private val gitHubSyncManager: GitHubSyncManager,
+    private val deviceController: DeviceController? = null
 ) {
     suspend fun runAgentTurn(
         sessionId: String,
@@ -37,7 +40,8 @@ class CodingAgentOrchestrator(
         modelId: String,
         userText: String,
         onStreamingMessageUpdated: (ChatMessageUi?) -> Unit,
-        confirmDeletion: suspend (PendingDeletionConfirmation) -> Boolean
+        confirmDeletion: suspend (PendingDeletionConfirmation) -> Boolean,
+        confirmDeviceAction: suspend (PendingDeviceActionConfirmation) -> Boolean = { true }
     ) {
         val adapter = providerRegistry.getAdapter(providerId)
             ?: throw IllegalStateException("Unknown provider: $providerId")
@@ -239,7 +243,7 @@ class CodingAgentOrchestrator(
                         resultText = output
                     )
                 } else {
-                    if (tc.name == "delete_file") {
+                    if (tc.name == "delete_file" || tc.name == "device_shell") {
                         toolRecords[idx] = tc.copy(status = ToolExecutionStatus.AWAITING_CONFIRMATION)
                         onStreamingMessageUpdated(currentUiMessage(streaming = true))
                     }
@@ -248,7 +252,8 @@ class CodingAgentOrchestrator(
                         toolCallId = tc.id,
                         toolName = tc.name,
                         argumentsJson = tc.argumentsJson,
-                        confirmDeletion = confirmDeletion
+                        confirmDeletion = confirmDeletion,
+                        confirmDeviceAction = confirmDeviceAction
                     )
                     val finalStatus = when {
                         outcome.wasCancelled -> ToolExecutionStatus.CANCELLED
@@ -290,23 +295,33 @@ class CodingAgentOrchestrator(
         projectId: String?,
         sessionMode: SessionMode?
     ): String {
-        if (projectId.isNullOrBlank()) {
-            return if (sessionMode == SessionMode.NORMAL) {
+        val workspacePart = if (projectId.isNullOrBlank()) {
+            if (sessionMode == SessionMode.NORMAL) {
                 "Active Workspace: None (Normal Q&A & Live Internet mode — use web_search and fetch_url for online information)."
             } else {
-                "Active Workspace: None selected. You can answer questions and use web_search/fetch_url, or ask the user to open/create a project in Projects if they want file edits."
+                "Active Workspace: None selected. You can answer questions, use web_search/fetch_url, or control the device if Root/Shizuku is active."
+            }
+        } else {
+            val project = workspaceManager.getProject(projectId)
+            if (project == null) {
+                "Active Workspace: None selected."
+            } else {
+                val nodes = workspaceManager.buildFileTree(projectId)
+                val preview = if (nodes.isEmpty()) {
+                    "(empty workspace)"
+                } else {
+                    nodes.take(60).joinToString("\n") { node ->
+                        if (node.isDirectory) "  [DIR] ${node.relativePath}/" else "  ${node.relativePath}"
+                    } + if (nodes.size > 60) "\n  ... (${nodes.size - 60} more items)" else ""
+                }
+                "Active Workspace: '${project.name}'\nWorkspace Files:\n$preview"
             }
         }
-        val project = workspaceManager.getProject(projectId)
-            ?: return "Active Workspace: None selected."
-        val nodes = workspaceManager.buildFileTree(projectId)
-        val preview = if (nodes.isEmpty()) {
-            "(empty workspace)"
-        } else {
-            nodes.take(60).joinToString("\n") { node ->
-                if (node.isDirectory) "  [DIR] ${node.relativePath}/" else "  ${node.relativePath}"
-            } + if (nodes.size > 60) "\n  ... (${nodes.size - 60} more items)" else ""
-        }
-        return "Active Workspace: '${project.name}'\nWorkspace Files:\n$preview"
+
+        val deviceProbe = deviceController?.probeStatus?.value
+        val devicePart = if (deviceProbe != null) {
+            "\nPhone Control Bridge: ${deviceProbe.statusSummary} (backend=${deviceProbe.activeBackend.name})"
+        } else ""
+        return workspacePart + devicePart
     }
 }

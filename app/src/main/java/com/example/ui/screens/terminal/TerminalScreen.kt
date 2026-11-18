@@ -179,6 +179,7 @@ fun TerminalScreen(
                         "+ React Vite" to "npx create-vite .",
                         "+ npm react" to "npm install react react-dom",
                         "+ Gradle Wrapper" to "ibpkg install gradle",
+                        "device status" to "device status",
                         "ibpkg list" to "ibpkg list",
                         "ls -la" to "ls -la",
                         "help" to "help"

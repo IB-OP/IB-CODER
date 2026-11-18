@@ -46,6 +46,7 @@ import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.QuestionAnswer
 import androidx.compose.material.icons.rounded.SmartToy
@@ -694,6 +695,62 @@ fun ChatScreen(
                     modifier = Modifier.testTag("cancel_agent_delete_button")
                 ) {
                     Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Privileged Device Action Confirmation Dialog (Root / Shizuku)
+    state.pendingDeviceAction?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { viewModel.resolveDeviceActionConfirmation(false) },
+            icon = {
+                Icon(
+                    Icons.Rounded.PhoneAndroid,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary
+                )
+            },
+            title = { Text(pending.actionTitle) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = pending.reason,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(4.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Text(
+                            text = pending.commandPreview,
+                            fontFamily = JetBrainsMonoFamily,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                    Text(
+                        text = "Allow the AI agent to run this privileged command on your phone?",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.resolveDeviceActionConfirmation(true) },
+                    modifier = Modifier.testTag("confirm_agent_device_action_button")
+                ) {
+                    Text("Allow")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { viewModel.resolveDeviceActionConfirmation(false) },
+                    modifier = Modifier.testTag("cancel_agent_device_action_button")
+                ) {
+                    Text("Deny")
                 }
             }
         )

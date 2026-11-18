@@ -32,14 +32,16 @@
 
 ### 1. Unified Sidebar IDE & Responsive Workspace
 - **App-Wide Sidebar Navigation:** Access every tool from a unified navigation drawer (`ModalNavigationDrawer` on phones with a one-tap menu button in every top bar; persistent `PermanentNavigationDrawer` on tablets `>= 840dp`):
-  - **Code Workbench** — Project file explorer, syntax-highlighted editor, and inline AI coding pane.
+  - **Code Workbench** — Project file explorer (collapsible in Code View), syntax-highlighted editor, and inline AI coding pane.
+  - **Terminal // sh** — Built-in `/system/bin/sh` shell + `ibpkg` package & toolchain installer (`npm install`, `npx create-vite`, `pip install`, `ibpkg install gradle`, `su`/`shizuku` privileged commands).
   - **Projects & Files** — Create, switch, import/export `.zip` archives, or bind workspaces to device folders or GitHub repos.
   - **AI Chat** — Real-time SSE streaming chat with collapsible reasoning traces, inline tool execution cards, live internet lookup indicators, and cancellation/stop control.
   - **Chat Sessions** — Multi-session Room-backed history with search, token usage metrics, and quick switching.
+  - **Phone Control (Root & Shizuku)** — Hardware/nav key injection, touch/swipe/text automation, live UI hierarchy inspector (`uiautomator dump`), app launcher, screenshot capture, and privileged shell execution via **Root (`su`)** or **Shizuku**.
   - **AI Providers & APIs** — Manage 23 built-in providers, fetch `/models` dynamically, or add custom API URLs.
   - **GitHub Hub & CI** — Manage repositories, auto-sync changes, dispatch Actions workflows, and auto-prompt AI bug fixes.
   - **MCP Servers** — Connect external MCP servers and inspect live discovered tools.
-  - **Settings & Sync** — Live Cloud Vault sync status, manual **Sync Now**, internet toggle, and account controls.
+  - **Settings & Sync** — Live Cloud Vault sync status, Guest Mode toggle, manual **Sync Now**, internet toggle, and account controls.
 
 ### 2. Three Flexible Project Storage Modes
 - **Device Folder (Android Storage Access Framework):** Tap **Create New Project → Pick Device Folder** to grant folder access through the system Files picker and edit files directly in place on your device.
@@ -56,15 +58,17 @@ When starting a new session, choose between:
   - `Android & Compose` (`ANDROID`) — Kotlin, Jetpack Compose, Material 3, Navigation Compose, and Gradle Kotlin DSL.
   - `Internet Researcher` (`WEB LIVE`) — Primary-source web research, API spec inspection, and source-cited summaries.
   - `Bug Hunter & CI Reviewer` (`DEBUG`) — Root-cause tracing, Gradle/CI diagnostics, and targeted code patches.
+  - `Phone Control (Root / Shizuku)` (`DEVICE`) — Automate Android UI, open apps, inspect screen elements, and run Root/Shizuku commands.
   - `Custom System Prompt` (`CUSTOM`) — Define your own rules, persona, or task brief.
 
-### 4. Built-In Agentic Tool Calling & Live Internet Access
-Models with tool-calling support can invoke **9 built-in tools** (with streaming visibility and confirmation safeguards):
+### 4. Built-In Agentic Tool Calling, Live Internet, Terminal & Phone Control
+Models with tool-calling support can invoke **19 built-in tools** (with streaming visibility and confirmation safeguards):
 
 | Tool | Capability |
 | :--- | :--- |
 | `web_search` | Live internet search for documentation, package APIs, endpoints, pricing, and current facts |
 | `fetch_url` | Fetch and inspect `http://` / `https://` web pages, docs, JSON endpoints, or raw GitHub files (`GET`/`POST`/`PUT`/`DELETE`/`HEAD`) |
+| `run_terminal` | Execute shell commands in `/system/bin/sh` or install `npm`, `pip`, and `gradle` toolchains |
 | `list_files` | List files and folders inside the active workspace |
 | `read_file` | Read file contents with line ranges and line numbers |
 | `write_file` | Create or overwrite files (auto-creating parent directories) |
@@ -72,6 +76,12 @@ Models with tool-calling support can invoke **9 built-in tools** (with streaming
 | `search_files` | Plain-text or regex search across workspace files |
 | `create_folder` | Create nested directory structures |
 | `delete_file` | Delete files or folders with **mandatory interactive user confirmation** |
+| `device_status` | Probe Root (`su`) & Shizuku status, screen resolution, battery, and active foreground app |
+| `device_ui_dump` | Capture live Android screen UI elements with exact `(x, y)` tap coordinates |
+| `device_tap` / `device_swipe` | Inject taps, long-presses, and swipe gestures on screen |
+| `device_type_text` / `device_keyevent` | Type text or press `HOME`, `BACK`, `RECENTS`, `POWER`, `VOLUME_UP/DOWN`, `ENTER` |
+| `device_list_apps` / `device_launch_app` | List installed packages and launch apps directly |
+| `device_shell` | Run privileged Root (`su`) or Shizuku shell commands with interactive user confirmation |
 
 > Models or providers that do not support tool calling (such as search-only or pure reasoning endpoints) are clearly surfaced in the provider UI.
 
@@ -123,21 +133,24 @@ IB CODER includes **23 built-in providers** plus **unlimited custom OpenAI-compa
 app/src/main/java/com/example/
 ├── data/
 │   ├── agent/          # Agent loop, prompt building, built-in & MCP tool execution
+│   ├── device/         # Root (su) & Shizuku privilege bridge, UIAutomator dump parser, DeviceController
 │   ├── local/          # Room entities, DAOs, database
 │   ├── mcp/            # MCP JSON-RPC client (Streamable HTTP & HTTP+SSE)
 │   ├── network/        # 23 provider adapters, live web tools, GitHub REST/Actions client
 │   ├── preferences/    # Jetpack DataStore + Keystore-encrypted credential storage
 │   ├── remote/         # CloudAccountVaultRepository & Firestore error handling
 │   ├── security/       # KeystoreCryptoManager (AES-256-GCM)
+│   ├── terminal/       # Built-in shell executor + ibpkg (npm/pip/gradle)
 │   └── workspace/      # Project sandboxes, SAF DocumentFile adapter, ZIP utilities
+├── device/             # ShizukuShellUserService (AIDL remote service)
 ├── domain/
-│   ├── model/          # Provider, Chat, GitHub, MCP, Session, and Workspace models
+│   ├── model/          # Provider, Chat, Device Control, GitHub, MCP, Session, and Workspace models
 │   └── prompt/         # Default prompts & selectable session prompt presets
 └── ui/
-    ├── AiCoderApp.kt   # Auth gate + responsive Modal/Permanent NavigationDrawer shell
+    ├── AiCoderApp.kt   # Auth/Guest gate + responsive Modal/Permanent NavigationDrawer shell
     ├── navigation/     # Type-safe Compose Navigation routes
-    ├── screens/        # Workspace, Projects, Chat, Sessions, Providers, GitHub, MCP, Settings, SignIn
-    └── theme/          # IB CODER pixel-dark Material 3 theme & JetBrains Mono typography
+    ├── screens/        # Workspace, Terminal, DeviceControl, Projects, Chat, Sessions, Providers, GitHub, MCP, Settings, SignIn
+    └── theme/          # IB CODER Cyber-CRT Material 3 theme & Silkscreen/JetBrains Mono typography
 ```
 
 ---

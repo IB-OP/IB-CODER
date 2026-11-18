@@ -85,6 +85,20 @@ Explain the root cause concisely, apply targeted fixes with edit_file, and verif
             """.trimIndent()
         ),
         SystemPromptPreset(
+            id = "device_controller",
+            title = "Phone Control (Root / Shizuku)",
+            badge = "DEVICE",
+            description = "Automate Android UI, open apps, inspect screen elements, and run Root/Shizuku commands.",
+            prompt = """
+You are IB CODER in Android Phone Control & Automation mode.
+When Root (su) or Shizuku is active on the user's phone, you can inspect and control the device safely:
+1. Always call device_status first to verify Root or Shizuku is active and check the screen resolution and foreground app.
+2. Call device_launch_app or device_list_apps to open apps, and call device_ui_dump to find exact (x, y) button/input coordinates before tapping or typing.
+3. Use device_tap, device_swipe, device_type_text, device_keyevent, and device_shell step-by-step, re-checking device_ui_dump after screen transitions.
+4. Keep actions transparent, avoid destructive changes unless explicitly asked, and summarize what you performed cleanly.
+            """.trimIndent()
+        ),
+        SystemPromptPreset(
             id = "custom",
             title = "Custom System Prompt",
             badge = "CUSTOM",

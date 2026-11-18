@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.rounded.AccountCircle
@@ -42,6 +43,7 @@ import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Terminal
@@ -97,9 +99,11 @@ import androidx.navigation.compose.rememberNavController
 import com.example.AppContainer
 import com.example.R
 import com.example.data.remote.CloudVaultSyncStatus
+import com.example.domain.model.PrivilegeBackend
 import com.example.ui.components.CyberWindowGlyphs
 import com.example.ui.components.cyberScanlineGrid
 import com.example.ui.navigation.ChatRoute
+import com.example.ui.navigation.DeviceControlRoute
 import com.example.ui.navigation.GitHubRoute
 import com.example.ui.navigation.McpServersRoute
 import com.example.ui.navigation.ProjectsRoute
@@ -113,6 +117,8 @@ import com.example.ui.screens.auth.SignInGateScreen
 import com.example.ui.screens.auth.performInteractiveGoogleSignIn
 import com.example.ui.screens.chat.ChatScreen
 import com.example.ui.screens.chat.ChatViewModel
+import com.example.ui.screens.device.DeviceControlScreen
+import com.example.ui.screens.device.DeviceControlViewModel
 import com.example.ui.screens.github.GitHubHubTab
 import com.example.ui.screens.github.GitHubScreen
 import com.example.ui.screens.github.GitHubViewModel
@@ -202,10 +208,12 @@ private fun AuthenticatedAiCoderShell(
     val settingsViewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory(container))
     val providersViewModel: ProvidersViewModel = viewModel(factory = ProvidersViewModel.Factory(container))
     val mcpServersViewModel: McpServersViewModel = viewModel(factory = McpServersViewModel.Factory(container))
+    val deviceControlViewModel: DeviceControlViewModel = viewModel(factory = DeviceControlViewModel.Factory(container))
 
     val workspaceUiState by workspaceViewModel.uiState.collectAsStateWithLifecycle()
     val settingsUiState by settingsViewModel.uiState.collectAsStateWithLifecycle()
     val terminalUiState by terminalViewModel.uiState.collectAsStateWithLifecycle()
+    val deviceUiState by deviceControlViewModel.uiState.collectAsStateWithLifecycle()
     val cloudSyncStatus by container.cloudAccountVaultRepository.syncStatus.collectAsStateWithLifecycle()
 
     var drawerSignInBusy by remember { mutableStateOf(false) }
@@ -257,6 +265,18 @@ private fun AuthenticatedAiCoderShell(
             selectedIcon = Icons.Rounded.History,
             unselectedIcon = Icons.Outlined.History,
             testTag = "drawer_nav_sessions"
+        ),
+        SidebarNavOption(
+            route = DeviceControlRoute,
+            label = "Phone Control",
+            selectedIcon = Icons.Rounded.PhoneAndroid,
+            unselectedIcon = Icons.Outlined.PhoneAndroid,
+            badge = when (deviceUiState.probe.activeBackend) {
+                PrivilegeBackend.ROOT -> "ROOT"
+                PrivilegeBackend.SHIZUKU -> "SHIZ"
+                else -> "OFF"
+            },
+            testTag = "drawer_nav_device_control"
         )
     )
 
@@ -387,6 +407,13 @@ private fun AuthenticatedAiCoderShell(
                     onOpenProviders = { navController.navigate(ProvidersRoute) },
                     onOpenMcpServers = { navController.navigate(McpServersRoute) },
                     onOpenGitHub = { navigateTopLevel(GitHubRoute) },
+                    onOpenSidebar = onOpenSidebar
+                )
+            }
+            composable<DeviceControlRoute> {
+                DeviceControlScreen(
+                    viewModel = deviceControlViewModel,
+                    onOpenChat = { navigateTopLevel(ChatRoute) },
                     onOpenSidebar = onOpenSidebar
                 )
             }
@@ -816,6 +843,7 @@ private fun isRouteSelected(currentDestination: NavDestination?, route: Any): Bo
         GitHubRoute -> currentDestination?.hasRoute<GitHubRoute>() == true
         McpServersRoute -> currentDestination?.hasRoute<McpServersRoute>() == true
         SettingsRoute -> currentDestination?.hasRoute<SettingsRoute>() == true
+        DeviceControlRoute -> currentDestination?.hasRoute<DeviceControlRoute>() == true
         else -> false
     }
 }

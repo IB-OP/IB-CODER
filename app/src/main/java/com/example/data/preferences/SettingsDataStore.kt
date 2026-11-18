@@ -11,9 +11,11 @@ import com.example.data.security.KeystoreCryptoManager
 import com.example.domain.model.AppAccountSession
 import com.example.domain.model.AppSettings
 import com.example.domain.model.CustomProviderDefinition
+import com.example.domain.model.DeviceControlSettings
 import com.example.domain.model.GitHubProjectConfig
 import com.example.domain.model.GitHubUserProfile
 import com.example.domain.model.McpServerConfig
+import com.example.domain.model.PrivilegeBackend
 import com.example.domain.model.ProviderConfig
 import com.example.domain.model.SessionPromptConfig
 import com.example.domain.model.ThemeMode
@@ -69,6 +71,9 @@ class SettingsDataStore(
         val GITHUB_TOKEN_SECRET = stringPreferencesKey("github_pat")
         val LOCAL_PASSCODE_HASH = stringPreferencesKey("local_passcode_hash")
         val GUEST_MODE = booleanPreferencesKey("guest_mode_enabled")
+        val PREFERRED_PRIVILEGE_BACKEND = stringPreferencesKey("preferred_privilege_backend")
+        val AI_PHONE_CONTROL_ENABLED = booleanPreferencesKey("ai_phone_control_enabled")
+        val CONFIRM_SENSITIVE_DEVICE_ACTIONS = booleanPreferencesKey("confirm_sensitive_device_actions")
     }
 
     private val _mutations = MutableSharedFlow<CloudVaultMutation>(extraBufferCapacity = 64)
@@ -245,6 +250,35 @@ class SettingsDataStore(
     suspend fun setGuestMode(enabled: Boolean) {
         context.settingsStore.edit { prefs ->
             prefs[Keys.GUEST_MODE] = enabled
+        }
+    }
+
+    val deviceControlSettingsFlow: Flow<DeviceControlSettings> = context.settingsStore.data.map { prefs ->
+        val backend = prefs[Keys.PREFERRED_PRIVILEGE_BACKEND]?.let { raw ->
+            runCatching { PrivilegeBackend.valueOf(raw) }.getOrNull()
+        } ?: PrivilegeBackend.AUTO
+        DeviceControlSettings(
+            preferredBackend = backend,
+            aiPhoneControlEnabled = prefs[Keys.AI_PHONE_CONTROL_ENABLED] ?: true,
+            confirmSensitiveDeviceActions = prefs[Keys.CONFIRM_SENSITIVE_DEVICE_ACTIONS] ?: true
+        )
+    }
+
+    suspend fun setPreferredPrivilegeBackend(backend: PrivilegeBackend) {
+        context.settingsStore.edit { prefs ->
+            prefs[Keys.PREFERRED_PRIVILEGE_BACKEND] = backend.name
+        }
+    }
+
+    suspend fun setAiPhoneControlEnabled(enabled: Boolean) {
+        context.settingsStore.edit { prefs ->
+            prefs[Keys.AI_PHONE_CONTROL_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setConfirmSensitiveDeviceActions(confirm: Boolean) {
+        context.settingsStore.edit { prefs ->
+            prefs[Keys.CONFIRM_SENSITIVE_DEVICE_ACTIONS] = confirm
         }
     }
 
